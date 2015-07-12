@@ -1,6 +1,6 @@
 PROJECT(skipdbv2)
 CMAKE_MINIMUM_REQUIRED (VERSION 2.8)
-ADD_DEFINITIONS(-Os -g  -Wstrict-prototypes -Wall  -falign-loops=16 -DBUILDING_SKIPDB_DLL)
+ADD_DEFINITIONS(-Os -g -Wstrict-prototypes -Wall  -falign-loops=16 -DBUILDING_SKIPDB_DLL -DUSE_SUFFIX_MATCHING=1)
 
 SET(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
 SET(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/lib)
@@ -16,3 +16,11 @@ ADD_LIBRARY(skipdb STATIC ${BASEKIT_SRC} ${FILE_SRC} ${UDB_SRC} ${SKIPDB_SRC})
 
 ADD_EXECUTABLE(test ./tests/test.c)
 TARGET_LINK_LIBRARIES(test m skipdb)
+
+ADD_EXECUTABLE(test2 ./tests/test2.c)
+TARGET_LINK_LIBRARIES(test2 m skipdb)
+
+ADD_EXECUTABLE(example ./tests/example.c)
+TARGET_LINK_LIBRARIES(example m skipdb)
+
+ADD_EXECUTABLE(skiplist ./tests/skiplist)

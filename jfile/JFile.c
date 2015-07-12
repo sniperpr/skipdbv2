@@ -336,7 +336,7 @@ void JFile_writeLogToFile(JFile *self)
 		}
 		
                 //by janson, TODO better
-                if (-1 == total) {
+                if (0 == total) {
                     return;
                 }
 

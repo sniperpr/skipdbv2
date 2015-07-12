@@ -231,7 +231,8 @@ void UDB_removeAt_(UDB *self, PID_TYPE pid)
 		
 		if (!record)
 		{
-			printf("UDB error: missing record with pid %" PID_FORMAT " for remove\n", pid);
+                        //TODO jannson
+			//printf("UDB error: missing record with pid %" PID_FORMAT " for remove\n", pid);
 			record = UDB_recordAtPid_(self, pid);
 			return;
 		}

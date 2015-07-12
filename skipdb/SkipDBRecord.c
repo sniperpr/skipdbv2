@@ -481,6 +481,7 @@ static int SkipDBRecord_compareKey_(SkipDBRecord *self, Datum key)
 	return Datum_compare_(&d, &key);
 }
 
+//Added by jannson
 //#define USE_SUFFIX_MATCHING 1
 
 SkipDBRecord *SkipDBRecord_find_quick_(SkipDBRecord *self, Datum key, int quick)
@@ -489,25 +490,23 @@ SkipDBRecord *SkipDBRecord_find_quick_(SkipDBRecord *self, Datum key, int quick)
 	int level = self->level;
 	
 #ifdef USE_SUFFIX_MATCHING
-	Datum kDatum = UArray_asDatum(self->key);
+	//Datum kDatum = UArray_asDatum(self->key);
+        Datum kDatum = Datum_FromUArray_(self->key);
 	unsigned char skMatchSize = Datum_matchingPrefixSizeWith_(&kDatum, &key);
 #endif
 	
-	//printf("key: %s find: %s\n", UArray_asCString(self->key), key.data);
-	//printf("find: %s in: ", key.data);
-	//SkipDBRecord_show(self);
-	/*
-	 printf("-------------\n", key.data);
-	 printf("key:    '%s' \n", key.data);
-	 printf("record: '%s' \n", UArray_asCString(self->key));
-	 printf("kMatchSize %i\n", kMatchSize);
-	 */
+	printf("record: %s find: %s in ", UArray_asCString(self->key), key.data);
+	SkipDBRecord_show(self);
+        printf("skMatchSize %i\n", skMatchSize);
+        printf("-------------\n\n");
+
 	while (level --)
 	{
 		SkipDBRecord *r = SkipDBRecord_recordAtLevel_(self, level);
 #ifdef USE_SUFFIX_MATCHING
 		unsigned char pkMatchSize = self->pointers[level].matchingPrefixSize;
 #endif
+                printf("pkMatchSize=%d\n", pkMatchSize);
 		
 		SkipDB_updateAt_put_(db, level, self);
 		
