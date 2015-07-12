@@ -36,6 +36,12 @@ int main(void)
 	SkipDB_close(u);
 	SkipDB_open(u);
 	
+	SkipDB_show(u);
+
+	strcpy(s, "test3");
+        k = Datum_FromCString_(s);
+        SkipDB_at_(u, k);
+#if 0
 	t1 = Date_SecondsFrom1970ToNow();
 	for (i = 0; i < max; i ++)
 	{
@@ -122,6 +128,7 @@ int main(void)
 		}
 	}
 	printf("removes verified\n");
+#endif
 	
 	SkipDB_delete(u);
 	SkipDB_free(u);

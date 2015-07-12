@@ -495,10 +495,10 @@ SkipDBRecord *SkipDBRecord_find_quick_(SkipDBRecord *self, Datum key, int quick)
 	unsigned char skMatchSize = Datum_matchingPrefixSizeWith_(&kDatum, &key);
 #endif
 	
-	printf("record: %s find: %s in ", UArray_asCString(self->key), key.data);
-	SkipDBRecord_show(self);
-        printf("skMatchSize %i\n", skMatchSize);
-        printf("-------------\n\n");
+	//printf("record: %s find: %s in ", UArray_asCString(self->key), key.data);
+	//SkipDBRecord_show(self);
+        //printf("skMatchSize %i\n", skMatchSize);
+        //printf("-------------\n\n");
 
 	while (level --)
 	{
@@ -506,8 +506,7 @@ SkipDBRecord *SkipDBRecord_find_quick_(SkipDBRecord *self, Datum key, int quick)
 #ifdef USE_SUFFIX_MATCHING
 		unsigned char pkMatchSize = self->pointers[level].matchingPrefixSize;
 #endif
-                printf("pkMatchSize=%d\n", pkMatchSize);
-		
+
 		SkipDB_updateAt_put_(db, level, self);
 		
 		//if (r && !(pkMatchSize > skMatchSize))

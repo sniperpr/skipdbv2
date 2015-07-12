@@ -30,8 +30,8 @@ int main(void)
 	
 	// read
 	
-	value = SkipDB_at_(db, key);
-        printf("%s=%s\n", key.data, value.data);
+	value = SkipDB_at_(db, key2);
+        printf("%s=%s\n", key2.data, value2.data);
 	
 	// count
 	
