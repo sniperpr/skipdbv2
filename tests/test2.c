@@ -18,7 +18,7 @@ int main(void)
 	SkipDB_delete(u);
 	SkipDB_open(u);
 
-	max = 8;
+	max = 4;
 
 	t1 = Date_SecondsFrom1970ToNow();
 	SkipDB_beginTransaction(u);
@@ -29,6 +29,11 @@ int main(void)
 
 		SkipDB_at_put_(u, k, k);
 	}
+
+        sprintf(s, "teszz");
+        k = Datum_FromCString_(s);
+        SkipDB_at_put_(u, k, k);
+
 	SkipDB_commitTransaction(u);
 	dt = Date_SecondsFrom1970ToNow()-t1;;
 	printf("	%i individual sequential transactional writes per second\n", (int)((double)max/dt));
@@ -38,7 +43,7 @@ int main(void)
 
 	//SkipDB_show(u);
 
-    strcpy(s, "test3");
+    strcpy(s, "teszz");
     k = Datum_FromCString_(s);
     t = SkipDB_at_(u, k);
     printf("resp:%s\n", t.data);
@@ -47,6 +52,23 @@ int main(void)
     SkipDBRecord* rc = SkipDBCursor_goto_(cursor, k);
     t = SkipDBRecord_valueDatum(rc);
     printf("cusor:%s\n", t.data);
+
+    rc = SkipDBCursor_next(cursor);
+    t = SkipDBRecord_valueDatum(rc);
+    printf("cusor:%s\n", t.data);
+
+    rc = SkipDBCursor_next(cursor);
+    t = SkipDBRecord_valueDatum(rc);
+    printf("cusor:%s\n", t.data);
+
+    rc = SkipDBCursor_next(cursor);
+    t = SkipDBRecord_valueDatum(rc);
+    printf("cusor:%s\n", t.data);
+
+    rc = SkipDBCursor_next(cursor);
+    t = SkipDBRecord_valueDatum(rc);
+    printf("cusor:%s\n", t.data);
+
     rc = SkipDBCursor_next(cursor);
     t = SkipDBRecord_valueDatum(rc);
     printf("cusor:%s\n", t.data);

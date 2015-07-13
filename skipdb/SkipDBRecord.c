@@ -506,6 +506,7 @@ SkipDBRecord *SkipDBRecord_find_quick_(SkipDBRecord *self, Datum key, int quick)
 		SkipDBRecord *r = SkipDBRecord_recordAtLevel_(self, level);
 #ifdef USE_SUFFIX_MATCHING
 		unsigned char pkMatchSize = self->pointers[level].matchingPrefixSize;
+                printf("pkMatchSize=%d, skMatchSize=%d\n", pkMatchSize, skMatchSize);
 #endif
 
 		SkipDB_updateAt_put_(db, level, self);
