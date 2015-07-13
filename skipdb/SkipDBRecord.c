@@ -14,7 +14,7 @@ static PID_TYPE SkipDBPointer_pid(SkipDBPointer *self)
 	return self->pid;
 }
 
-//----------------------------------------------------- 
+//-----------------------------------------------------
 
 SkipDBRecord *SkipDBRecord_new(void)
 {
@@ -36,7 +36,7 @@ SkipDBRecord *SkipDBRecord_newWithDB_(void *db)
 	return self;
 }
 
-// older/younger ------------------------ 
+// older/younger ------------------------
 
 void SkipDBRecord_setOlderRecord_(SkipDBRecord *self, SkipDBRecord *r)
 {
@@ -44,7 +44,7 @@ void SkipDBRecord_setOlderRecord_(SkipDBRecord *self, SkipDBRecord *r)
 	{
 		printf("error: r == self\n");
 	}
-	
+
 	self->olderRecord = r;
 }
 
@@ -59,7 +59,7 @@ void SkipDBRecord_setYoungerRecord_(SkipDBRecord *self, SkipDBRecord *r)
 	{
 		printf("error: r == self\n");
 	}
-	
+
 	self->youngerRecord = r;
 }
 
@@ -72,7 +72,7 @@ void SkipDBRecord_removeFromAgeList(SkipDBRecord *self)
 {
 	SkipDBRecord *or = self->olderRecord;
 	SkipDBRecord *yr = self->youngerRecord;
-	
+
 	if (or) SkipDBRecord_setYoungerRecord_(or, yr);
 	if (yr) SkipDBRecord_setOlderRecord_(yr, or);
 }
@@ -80,36 +80,36 @@ void SkipDBRecord_removeFromAgeList(SkipDBRecord *self)
 void SkipDBRecord_showAgeList(SkipDBRecord *self)
 {
 	SkipDBRecord *r = self;
-	
+
 	printf("age list:\n");
-	
+
 	while (r)
 	{
-		printf("  record %p '%s'\n", 
+		printf("  record %p '%s'\n",
 			  (void *)r, (char *)UArray_asCString(r->key));
 		r = r->olderRecord;
 	}
 }
 
-//----------------------------------------- 
+//-----------------------------------------
 
 int SkipDBRecord_pointersAreEmpty(SkipDBRecord *self)
 {
 	SkipDBPointer *pointers = self->pointers;
-	
-	if (pointers) 
+
+	if (pointers)
 	{
 		int i, max = self->level;
-		
+
 		for (i = 0; i < max; i ++)
 		{
 			SkipDBRecord *r = pointers[i].record;
 			PID_TYPE pid = pointers[i].pid;
-			
+
 			if (r || pid) return 0;
 		}
 	}
-	
+
 	return 1;
 }
 
@@ -117,15 +117,15 @@ int SkipDBRecord_pointersAreEmpty(SkipDBRecord *self)
 void SkipDBRecord_removeReferencesToUnmarked(SkipDBRecord *self)
 {
 	SkipDBPointer *pointers = self->pointers;
-	
-	if (pointers) 
+
+	if (pointers)
 	{
 		int i, max = self->level;
-		
+
 		for (i = 0; i < max; i ++)
 		{
 			SkipDBRecord *r = pointers[i].record;
-			
+
 			if (r && r->mark == 0)
 			{
 				pointers[i].pid = SkipDBRecord_pid(r);
@@ -133,7 +133,7 @@ void SkipDBRecord_removeReferencesToUnmarked(SkipDBRecord *self)
 			}
 		}
 	}
-	
+
 	if (self->previousRecord && self->previousRecord->mark == 0)
 	{
 		self->previousPid = SkipDBRecord_pid(self->previousRecord);
@@ -154,12 +154,12 @@ void SkipDBRecord_dealloc(SkipDBRecord *self)
 	printf("SkipDBRecord_dealloc(%p)\n", (void *)self);
 	List_append_(deallocedRecords, self);
 #endif
-	
+
 	SkipDB_noteWillFreeRecord_((SkipDB *)(self->sdb), self);
-	
-	if (self->pointers) 
+
+	if (self->pointers)
 	{
-		
+
 // Commented out since we should not touch records linked
 //  from here, because they may have already been freed.
 //  (e.g. see SkipDB_freeAllCachedRecords or SkipDB_freeExcessCachedRecords).
@@ -169,18 +169,18 @@ void SkipDBRecord_dealloc(SkipDBRecord *self)
 //		{
 //			next->record->previousRecord = NULL;
 //		}
-		
+
 		free(self->pointers);
 	}
-	
+
 	if (self->ownsKey) // is this correct?
-	{    
+	{
 		UArray_free(self->key);
 	}
-	
+
 	UArray_free(self->value);
-	
-	
+
+
 #ifdef SKIPDB_DEBUG
 	return;
 #endif
@@ -211,7 +211,7 @@ PID_TYPE SkipDBRecord_pidAllocIfNeeded(SkipDBRecord *self)
 		SkipDBRecord_pid_(self, pid);
 		//printf("record '%s' alloced pid %i\n", (char *)UArray_asCString(self->key), (int)self->pid);
 	}
-	
+
 	return self->pid;
 }
 
@@ -239,7 +239,7 @@ uint8_t SkipDBRecord_isDirty(SkipDBRecord *self)
 	return self->isDirty;
 }
 
-// key ------------------------------------ 
+// key ------------------------------------
 
 void SkipDBRecord_keyDatum_(SkipDBRecord *self, Datum k)
 {
@@ -256,7 +256,7 @@ UArray *SkipDBRecord_key(SkipDBRecord *self)
 	return self->key;
 }
 
-// value ------------------------------------ 
+// value ------------------------------------
 
 void SkipDBRecord_valueDatum_(SkipDBRecord *self, Datum v)
 {
@@ -273,7 +273,7 @@ UArray *SkipDBRecord_value(SkipDBRecord *self)
 	return self->value;
 }
 
-// pointers ------------------------------------ 
+// pointers ------------------------------------
 
 int SkipDBRecord_level(SkipDBRecord *self)
 {
@@ -284,9 +284,9 @@ void SkipDBRecord_level_(SkipDBRecord *self, int level)
 {
 	int oldLevel = self->level;
 	self->level = level;
-	
+
 	self->pointers = (SkipDBPointer *)realloc(self->pointers, level * sizeof(SkipDBPointer));
-	
+
 	if (level > oldLevel)
 	{
 		memset(self->pointers + oldLevel, 0, (level - oldLevel) * sizeof(SkipDBPointer));
@@ -295,10 +295,10 @@ void SkipDBRecord_level_(SkipDBRecord *self, int level)
 
 static void SkipDBRecord_checkLevel_(SkipDBRecord *self, int level)
 {
-     if (level > self->level - 1) 
-     { 
-		printf("SkipDBRecord level out of range\n"); 
-		exit(1); 
+     if (level > self->level - 1)
+     {
+		printf("SkipDBRecord level out of range\n");
+		exit(1);
      }
 }
 
@@ -327,12 +327,12 @@ PID_TYPE SkipDBRecord_allocedPidAtLevel_(SkipDBRecord *self, int level)
 {
 	SkipDBPointer *p = SkipDBRecord_pointerAtLevel_(self, level);
 	PID_TYPE pid = p->pid;
-	
+
 	if (!pid && p->record)
 	{
 		pid = SkipDBRecord_pidAllocIfNeeded(p->record);
 	}
-	
+
 	return pid;
 }
 
@@ -340,12 +340,12 @@ PID_TYPE SkipDBRecord_pidAtLevel_(SkipDBRecord *self, int level)
 {
 	SkipDBPointer *p = SkipDBRecord_pointerAtLevel_(self, level);
 	PID_TYPE pid = p->pid;
-	
+
 	if (!pid && p->record)
 	{
 		pid = SkipDBRecord_pid(self);
 	}
-	
+
 	return pid;
 }
 
@@ -360,8 +360,8 @@ unsigned char SkipDBRecord_matchingPrefixSizeWith_(SkipDBRecord *self, SkipDBRec
 void SkipDBRecord_atLevel_setRecord_(SkipDBRecord *self, int level, SkipDBRecord *r)
 {
 	SkipDBRecord_checkLevel_(self, level);
-	SkipDBRecord_atLevel_setPid_(self, level, SkipDBRecord_pid(r)); 
-	
+	SkipDBRecord_atLevel_setPid_(self, level, SkipDBRecord_pid(r));
+
 	{
 		SkipDBPointer *p = SkipDBRecord_pointerAtLevel_(self, level);
 		SkipDBPointer_setRecord_(p, r);
@@ -372,55 +372,56 @@ void SkipDBRecord_atLevel_setRecord_(SkipDBRecord *self, int level, SkipDBRecord
 SkipDBRecord *SkipDBRecord_cachedRecordAtLevel_(SkipDBRecord *self, int level)
 {
 	SkipDBRecord_checkLevel_(self, level);
-	
+
 	return self->pointers[level].record;
 }
 
+//直接下降到0层级，获取下个元素
 SkipDBRecord *SkipDBRecord_recordAtLevel_(SkipDBRecord *self, int level)
 {
 	SkipDBRecord_checkLevel_(self, level);
-	
+
 	{
 		SkipDBPointer *p = SkipDBRecord_pointerAtLevel_(self, level);
 		SkipDBRecord *r = p->record;
-		
+
 		if (!r && p->pid)
 		{
 			r = SkipDB_recordAtPid_((SkipDB *)(self->sdb), p->pid);
 			SkipDBPointer_setRecord_(p, r);
 		}
-		
+
 		return r;
 	}
 }
 
-// serialization ------------------------------------ 
+// serialization ------------------------------------
 
 void SkipDBRecord_toStream_(SkipDBRecord *self, BStream *s)
 {
 	BStream_writeTaggedUArray_(s, self->key);
 	BStream_writeTaggedUArray_(s, self->value);
-	
+
 	//printf("writing record '%s'\n", (char *)UArray_asCString(self->key));
-	
+
 	{
 		int level, max = SkipDBRecord_level(self);
 		BStream_writeTaggedInt32_(s, max);
-		
+
 		for (level = 0; level < max; level ++)
 		{
 			SkipDBPointer *p = SkipDBRecord_pointerAtLevel_(self, level);
 			PID_TYPE pid = SkipDBRecord_allocedPidAtLevel_(self, level);
 			BStream_writeTaggedInt32_(s, pid);
-			
+
 			//if (p->record) printf("'%s' %i\n", (char *)UArray_asCString(p->record->key), (int)pid);
-			
+
 			BStream_writeTaggedUint8_(s, p->matchingPrefixSize);
 		}
 	}
-	
+
 	//printf("\n");
-	
+
 	//BStream_show(s);
 }
 
@@ -428,12 +429,12 @@ void SkipDBRecord_fromStream_(SkipDBRecord *self, BStream *s)
 {
 	BStream_readTaggedUArray_(s, self->key);
 	BStream_readTaggedUArray_(s, self->value);
-	
+
 	{
 		int level, max = BStream_readTaggedInt32(s);
-		
+
 		SkipDBRecord_level_(self, max);
-		
+
 		for (level = 0; level < max; level ++)
 		{
 			PID_TYPE pid = BStream_readTaggedInt32(s);
@@ -441,7 +442,7 @@ void SkipDBRecord_fromStream_(SkipDBRecord *self, BStream *s)
 			SkipDBRecord_atLevel_setPid_setSuffix_(self, level, pid, sMatch);
 		}
 	}
-	
+
 	//BStream_show(s);
 }
 
@@ -453,11 +454,11 @@ void SkipDBRecord_save(SkipDBRecord *self)
 		BStream *s = SkipDB_tmpStream(sdb);
 		BStream_empty(s);
 		SkipDBRecord_toStream_(self, s);
-		
+
 		{
 			Datum d = Datum_FromUArray_(BStream_byteArray(s));
 			PID_TYPE pid = SkipDBRecord_pid(self);
-			
+
 			if (pid)
 			{
 				UDB_at_put_(SkipDB_udb(sdb), pid, d);
@@ -465,15 +466,15 @@ void SkipDBRecord_save(SkipDBRecord *self)
 			else
 			{
 				pid = UDB_put_(SkipDB_udb(sdb), d);
-				SkipDBRecord_pid_(self, pid);	
+				SkipDBRecord_pid_(self, pid);
 			}
 		}
-		
+
 		SkipDBRecord_markAsClean(self);
 	}
 }
 
-// search ------------------------------------ 
+// search ------------------------------------
 
 static int SkipDBRecord_compareKey_(SkipDBRecord *self, Datum key)
 {
@@ -488,13 +489,13 @@ SkipDBRecord *SkipDBRecord_find_quick_(SkipDBRecord *self, Datum key, int quick)
 {
 	SkipDB *db = (SkipDB *)(self->sdb);
 	int level = self->level;
-	
+
 #ifdef USE_SUFFIX_MATCHING
 	//Datum kDatum = UArray_asDatum(self->key);
         Datum kDatum = Datum_FromUArray_(self->key);
 	unsigned char skMatchSize = Datum_matchingPrefixSizeWith_(&kDatum, &key);
 #endif
-	
+
 	//printf("record: %s find: %s in ", UArray_asCString(self->key), key.data);
 	//SkipDBRecord_show(self);
         //printf("skMatchSize %i\n", skMatchSize);
@@ -508,12 +509,12 @@ SkipDBRecord *SkipDBRecord_find_quick_(SkipDBRecord *self, Datum key, int quick)
 #endif
 
 		SkipDB_updateAt_put_(db, level, self);
-		
+
 		//if (r && !(pkMatchSize > skMatchSize))
 		if (r)
 		{
 			int c;
-			
+
 #ifdef USE_SUFFIX_MATCHING
 			if (pkMatchSize > skMatchSize)
 			{
@@ -524,11 +525,11 @@ SkipDBRecord *SkipDBRecord_find_quick_(SkipDBRecord *self, Datum key, int quick)
 				return SkipDBRecord_find_quick_(r, key, quick);
 			}
 #endif
-			
+
 			c = SkipDBRecord_compareKey_(r, key);
-			
+
 			//printf("key: %s at level: %i\n", UArray_asCString(r->key), level);
-			
+
 			/*
 			 if (UArray_sizeInBytes(r->key) == 0)
 			 {
@@ -536,40 +537,41 @@ SkipDBRecord *SkipDBRecord_find_quick_(SkipDBRecord *self, Datum key, int quick)
 				 exit(1);
 			 }
 			 */
-			
-			if (c == 0) // record is a match 
+
+			if (c == 0) // record is a match
 			{
 				if (level == 0 || quick)
 				{
 					return r;
 				}
 			}
-			else if (c < 0) // record key is smaller 
+			else if (c < 0) // record key is smaller
 			{
+                //往前面节点找，遇到大的，就往下个level找
 				return SkipDBRecord_find_quick_(r, key, quick);
 			}
-			// otherwise record key is bigger so we keep searching 
+			// otherwise record key is bigger so we keep searching
 		}
 	}
-	
+
 	return NULL;
 }
 
 SkipDBRecord *SkipDBRecord_findLastRecord(SkipDBRecord *self)
 {
 	int level = self->level;
-	
+
 	while (level --)
 	{
 		SkipDBRecord *r = SkipDBRecord_recordAtLevel_(self, level);
-		
+
 		if (r)
 		{
 			return SkipDBRecord_findLastRecord(r);
 		}
-		
+
 	}
-	
+
 	return self;
 }
 
@@ -577,7 +579,7 @@ void SkipDBRecord_copyLevel_from_(SkipDBRecord *self, int level, SkipDBRecord *o
 {
 	PID_TYPE newPid = SkipDBRecord_pidAtLevel_(other, level);
 	SkipDBRecord *cachedRecord = SkipDBRecord_cachedRecordAtLevel_(other, level);
-	
+
 	if (cachedRecord)
 	{
 		SkipDBRecord_atLevel_setRecord_(self, level, cachedRecord);
@@ -592,7 +594,7 @@ void SkipDBRecord_willRemove_(SkipDBRecord *self, SkipDBRecord *other)
 {
 	PID_TYPE otherPid = SkipDBRecord_pid(other);
 	int level = self->level;
-	
+
 	while (level --)
 	{
 		if ((otherPid && SkipDBRecord_pidAtLevel_(self, level) == otherPid) ||
@@ -602,7 +604,7 @@ void SkipDBRecord_willRemove_(SkipDBRecord *self, SkipDBRecord *other)
 			SkipDBRecord_markAsDirty(self);
 		}
 	}
-	
+
 	/*
 	 if (SkipDBRecord_hasRecord_(self, other))
 	 {
@@ -615,10 +617,10 @@ void SkipDBRecord_willRemove_(SkipDBRecord *self, SkipDBRecord *other)
 int SkipDBRecord_hasRecord_(SkipDBRecord *self, SkipDBRecord *other)
 {
 	int i;
-	
+
 	for (i = 0; i < self->level; i ++)
-	{	
-		if (self->pointers[i].record == other) 
+	{
+		if (self->pointers[i].record == other)
 		{
 			return 1;
 		}
@@ -633,11 +635,11 @@ void SkipDBRecord_show(SkipDBRecord *self)
 	//	UArray_asCString(self->key), UArray_asCString(self->value));
 	//printf("SRec %i '%s' (", self->pid, UArray_asCString(self->key));
 	printf("  record %i '%s'\t:\t", (int)self->pid, UArray_asCString(self->key));
-	
+
 	for (i = 0; i < self->level; i ++)
 	{
 		SkipDBRecord *r = self->pointers[i].record;
-		
+
 		if (r)
 		{
 			printf("'%s'", UArray_asCString(r->key));
@@ -646,16 +648,16 @@ void SkipDBRecord_show(SkipDBRecord *self)
 		{
 			printf("%i", (int)(self->pointers[i].pid));
 		}
-		
+
 		printf("\t");
-		
+
 		//if (i != self->level - 1) printf(", ");
 	}
-	
+
 	printf("\n");
 }
 
-// object ------------------------------------ 
+// object ------------------------------------
 
 void SkipDBRecord_object_(SkipDBRecord *self, void *object)
 {
@@ -667,14 +669,14 @@ void *SkipDBRecord_object(SkipDBRecord *self)
 	return self->object;
 }
 
-// next ------------------------------------ 
+// next ------------------------------------
 
 SkipDBRecord *SkipDBRecord_nextRecord(SkipDBRecord *self)
 {
 	return SkipDBRecord_recordAtLevel_(self, 0);
 }
 
-// previous ------------------------------------ 
+// previous ------------------------------------
 
 void SkipDBRecord_previousPid_(SkipDBRecord *self, PID_TYPE pid)
 {
@@ -695,14 +697,14 @@ void SkipDBRecord_previousRecord_(SkipDBRecord *self, SkipDBRecord *r)
 		{
 			printf("SkipDB error: attempt to set previousRecord to self\n");
 		}
-		
+
 		self->previousRecord = r;
-		
+
 		if (r)
 		{
 			self->previousPid = SkipDBRecord_pid(r);
 		}
-		
+
 		SkipDBRecord_markAsDirty(self);
 	}
 }
@@ -725,12 +727,12 @@ SkipDBRecord *SkipDBRecord_previousRecord(SkipDBRecord *self)
 	{
 		self->previousRecord = SkipDB_recordAtPid_((SkipDB *)(self->sdb), self->previousPid);
 	}
-	
+
 #ifdef SKIPDB_DEBUG
 	textValid(self);
 	textValid(self->previousRecord);
 #endif
-	
+
 	return self->previousRecord;
 }
 

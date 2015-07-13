@@ -5,20 +5,20 @@
 
 int main(void)
 {
-	Datum k;
+	Datum k, t;
 	int i, max;
 	time_t t1;
-	double dt; 
+	double dt;
 	char s[100];
-		
+
 	SkipDB *u = SkipDB_new();
-	
+
 	printf("SkipDB (ordered key/value database) performance test:\n");
 	SkipDB_setPath_(u, "test.skipdb");
 	SkipDB_delete(u);
 	SkipDB_open(u);
-	
-	max = 5;
+
+	max = 8;
 
 	t1 = Date_SecondsFrom1970ToNow();
 	SkipDB_beginTransaction(u);
@@ -26,7 +26,7 @@ int main(void)
 	{
 		sprintf(s, "test%i", i);
 		k = Datum_FromCString_(s);
-		
+
 		SkipDB_at_put_(u, k, k);
 	}
 	SkipDB_commitTransaction(u);
@@ -35,12 +35,21 @@ int main(void)
 
 	SkipDB_close(u);
 	SkipDB_open(u);
-	
-	SkipDB_show(u);
 
-	strcpy(s, "test3");
-        k = Datum_FromCString_(s);
-        SkipDB_at_(u, k);
+	//SkipDB_show(u);
+
+    strcpy(s, "test3");
+    k = Datum_FromCString_(s);
+    t = SkipDB_at_(u, k);
+    printf("resp:%s\n", t.data);
+
+    SkipDBCursor* cursor = SkipDBCursor_newWithDB_(u);
+    SkipDBRecord* rc = SkipDBCursor_goto_(cursor, k);
+    t = SkipDBRecord_valueDatum(rc);
+    printf("cusor:%s\n", t.data);
+    rc = SkipDBCursor_next(cursor);
+    t = SkipDBRecord_valueDatum(rc);
+    printf("cusor:%s\n", t.data);
 #if 0
 	t1 = Date_SecondsFrom1970ToNow();
 	for (i = 0; i < max; i ++)
@@ -48,7 +57,7 @@ int main(void)
 		Datum d;
 		sprintf(s, "test%i", i);
 		k = Datum_FromCString_(s);
-				
+
 		d = SkipDB_at_(u, k);
 
 		if (d.data == NULL || d.size == 0)
@@ -71,7 +80,7 @@ int main(void)
 		Datum d;
 		sprintf(s, "test%i", i);
 		k = Datum_FromCString_(s);
-				
+
 		d = SkipDB_at_(u, k);
 
 		if (d.data == NULL || d.size == 0)
@@ -89,7 +98,7 @@ int main(void)
 		}
 	}
 	printf("writes verified\n");
-        
+
 	SkipDB_show(u);
 
 	printf("testing removes\n");
@@ -106,7 +115,7 @@ int main(void)
 	SkipDB_close(u);
 	printf("closing after removes\n");
 	SkipDB_open(u);
-	
+
 	SkipDB_show(u);
 
 	t1 = Date_SecondsFrom1970ToNow();
@@ -115,7 +124,7 @@ int main(void)
 		Datum d;
 		sprintf(s, "test%i", i);
 		k = Datum_FromCString_(s);
-				
+
 		d = SkipDB_at_(u, k);
 
 		if (d.data == NULL || d.size == 0)
@@ -129,7 +138,7 @@ int main(void)
 	}
 	printf("removes verified\n");
 #endif
-	
+
 	SkipDB_delete(u);
 	SkipDB_free(u);
 	return 0;
