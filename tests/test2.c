@@ -3,6 +3,43 @@
 #include <stdlib.h>
 #include "Date.h"
 
+void skipdb_list(SkipDB* self, SkipDBRecord* rc, void* ctx)
+{
+	Datum k = SkipDBRecord_keyDatum(rc);
+    Datum v = SkipDBRecord_valueDatum(rc);
+    printf("%s=%s\n", k.data, v.data);
+}
+
+void SkipDB_show_by_prefix(SkipDB *u, Datum k)
+{
+	Datum t;
+    SkipDBCursor* cursor = SkipDBCursor_newWithDB_(u);
+    SkipDBRecord* rc = SkipDBCursor_goto_(cursor, k);
+    if(NULL == rc) {
+        printf("hear\n");
+        return;
+    }
+
+    t = SkipDBRecord_valueDatum(rc);
+    //printf("k.size=%d t.size=%d k=%s t=%s\n", k.size, t.size, k.data, t.data);
+    if((k.size <= t.size) && (0 == strncmp((char*)t.data, (char*)k.data, k.size-1))) {
+        printf("%s\n", t.data);
+    }
+
+    rc = SkipDBCursor_next(cursor);
+    while(NULL != rc) {
+        t = SkipDBRecord_valueDatum(rc);
+        if((k.size <= t.size) && (0 == strncmp((char*)t.data, (char*)k.data, k.size-1))) {
+            printf("%s\n", t.data);
+            rc = SkipDBCursor_next(cursor);
+        } else {
+            break;
+        }
+    }
+
+    SkipDBCursor_release(cursor);
+}
+
 int main(void)
 {
 	Datum k, t;
@@ -18,7 +55,7 @@ int main(void)
 	SkipDB_delete(u);
 	SkipDB_open(u);
 
-	max = 4;
+	max = 3000;
 
 	t1 = Date_SecondsFrom1970ToNow();
 	SkipDB_beginTransaction(u);
@@ -30,10 +67,6 @@ int main(void)
 		SkipDB_at_put_(u, k, k);
 	}
 
-        sprintf(s, "teszz");
-        k = Datum_FromCString_(s);
-        SkipDB_at_put_(u, k, k);
-
 	SkipDB_commitTransaction(u);
 	dt = Date_SecondsFrom1970ToNow()-t1;;
 	printf("	%i individual sequential transactional writes per second\n", (int)((double)max/dt));
@@ -43,35 +76,9 @@ int main(void)
 
 	//SkipDB_show(u);
 
-    strcpy(s, "teszz");
-    k = Datum_FromCString_(s);
-    t = SkipDB_at_(u, k);
-    printf("resp:%s\n", t.data);
-
-    SkipDBCursor* cursor = SkipDBCursor_newWithDB_(u);
-    SkipDBRecord* rc = SkipDBCursor_goto_(cursor, k);
-    t = SkipDBRecord_valueDatum(rc);
-    printf("cusor:%s\n", t.data);
-
-    rc = SkipDBCursor_next(cursor);
-    t = SkipDBRecord_valueDatum(rc);
-    printf("cusor:%s\n", t.data);
-
-    rc = SkipDBCursor_next(cursor);
-    t = SkipDBRecord_valueDatum(rc);
-    printf("cusor:%s\n", t.data);
-
-    rc = SkipDBCursor_next(cursor);
-    t = SkipDBRecord_valueDatum(rc);
-    printf("cusor:%s\n", t.data);
-
-    rc = SkipDBCursor_next(cursor);
-    t = SkipDBRecord_valueDatum(rc);
-    printf("cusor:%s\n", t.data);
-
-    rc = SkipDBCursor_next(cursor);
-    t = SkipDBRecord_valueDatum(rc);
-    printf("cusor:%s\n", t.data);
+	sprintf(s, "test%d", 33);
+	t = Datum_FromCString_(s);
+    SkipDB_list_prefix(u, t, NULL, skipdb_list);
 #if 0
 	t1 = Date_SecondsFrom1970ToNow();
 	for (i = 0; i < max; i ++)

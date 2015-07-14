@@ -2,7 +2,7 @@
 SkipDB ioDoc(
 		   docCopyright("Steve Dekorte", 2004)
 		   docLicense("BSD revised")
-		   docObject("SkipDB")    
+		   docObject("SkipDB")
 		   docDescription("BerkeleyDB style database implemented with skip lists instead of a b-tree.")
 		   */
 
@@ -11,56 +11,56 @@ SkipDB ioDoc(
 #include <stdlib.h>
 #include <string.h>
 
-// lookups 
+// lookups
 
 void SkipDB_clearUpdate(SkipDB *self);
 
-// ops 
+// ops
 
 void SkipDB_readRootRecord(SkipDB *self);
 
-// ---------------------------------------------------------- 
+// ----------------------------------------------------------
 
 SkipDB *SkipDB_new(void)
 {
 	SkipDB *self = (SkipDB *)calloc(1, sizeof(SkipDB));
 	self->udb = UDB_new();
-	
-	self->p = SKIPDB_PROBABILITY_DISTRIBUTION; 
+
+	self->p = SKIPDB_PROBABILITY_DISTRIBUTION;
 	self->stream = BStream_new();
-	
+
 	self->cursors = List_new();
-	
+
 	self->pidsToRemove = List_new();
 	self->dirtyRecords = List_new();
-	
+
 	self->cacheHighWaterMark = 100000;
 	self->cacheLowWaterMark  = 500;
-	
+
 	self->pidToRecord = PHash_new();
 	self->randomGen = RandomGen_new();
-	
+
 	/*
     self->header = SkipDBRecord_newWithDB_(self);
     SkipDBRecord_keyDatum_(self->header, Datum_Empty());
     SkipDBRecord_valueDatum_(self->header, Datum_Empty());
 	self->headerPid = 0;
 	*/
-	
+
 	return self;
 }
 
 void SkipDB_dealloc(SkipDB *self)
 {
 	SkipDB_clearUpdate(self);
-	
+
 	BStream_free(self->stream);
 	SkipDB_freeAllCachedRecords(self);
-	
+
 	// cursors are allocated and must be freed individually.
 	List_do_(self->cursors, (ListDoCallback *)SkipDBCursor_release);
 	List_free(self->cursors);
-	
+
 	List_free(self->pidsToRemove);
 	List_free(self->dirtyRecords);
 	PHash_free(self->pidToRecord);
@@ -118,29 +118,29 @@ void SkipDB_delete(SkipDB *self)
 {
 	SkipDB_close(self);
 	UDB_delete(self->udb);
-/*	
+/*
 	int count = 0;
 	SkipDBRecord *r = self->header;
-	
+
 	while (r)
 	{
 		PID_TYPE pid = SkipDBRecord_pid(r);
 		SkipDBRecord *next = SkipDBRecord_nextRecord(self->header);
-		
+
 		if (pid)
-		{   
+		{
 			UDB_removeAt_(SkipDB_udb(self), pid);
 		}
-		
+
 		r = next;
 		count ++;
 	}
-	
+
 	return count;
 	*/
 }
 
-// notifications --------------------------------- 
+// notifications ---------------------------------
 
 void SkipDB_noteNewRecord_(SkipDB *self, SkipDBRecord *r)
 {
@@ -151,21 +151,21 @@ void SkipDB_noteNewRecord_(SkipDB *self, SkipDBRecord *r)
 void SkipDB_noteAccessedRecord_(SkipDB *self, SkipDBRecord *r)
 {
 	SkipDBRecord *y = self->youngestRecord;
-	
+
 	//SkipDBRecord_showAgeList(r);
-	
+
 	if (y != r)
-	{    
+	{
 		if (y)
 		{
 			SkipDBRecord_removeFromAgeList(r);
 			SkipDBRecord_setOlderRecord_(r, y);
 			SkipDBRecord_setYoungerRecord_(y, r);
 		}
-		
+
 		self->youngestRecord = r;
 	}
-	
+
 	//SkipDBRecord_showAgeList(r);
 }
 
@@ -186,20 +186,20 @@ void SkipDB_noteWillFreeRecord_(SkipDB *self, SkipDBRecord *r)
 {
 	SkipDBFreeObjectFunc *f = self->objectFreeFunc;
 	void *object = SkipDBRecord_object(r);
-	
+
 	if (f && object)
 	{
 		(*f)(object);
 	}
-	
+
 	self->cachedRecordCount --;
-	
+
 	if (r == self->youngestRecord)
 	{
 		self->youngestRecord = SkipDBRecord_olderRecord(r);
 		//printf("will free youngestRecord\n");
 	}
-	
+
 	SkipDBRecord_removeFromAgeList(r);
 	PHash_removeKey_(self->pidToRecord, (void *)SkipDBRecord_pid(r));
 }
@@ -208,23 +208,23 @@ void SkipDB_freeAllCachedRecords(SkipDB *self)
 {
 	//SkipDBRecord *r = self->youngestRecord;
 	//self->headerPid = SkipDBRecord_pid(self->header);
-	
+
 	//SkipDBRecord_showAgeList(self->youngestRecord);
-	
+
 	while (self->youngestRecord)
 	{
 		SkipDBRecord_dealloc(self->youngestRecord);
 	}
-	
+
 	self->header = NULL;
 }
 
-// cache ------------------------------------- 
+// cache -------------------------------------
 
 void SkipDB_setCacheHighWaterMark_(SkipDB *self, size_t recordCount)
 {
 	self->cacheHighWaterMark = recordCount;
-	
+
 	if (recordCount < self->cacheLowWaterMark)
 	{
 		self->cacheLowWaterMark = recordCount / 2;
@@ -239,7 +239,7 @@ size_t SkipDB_cacheHighWaterMark(SkipDB *self)
 void SkipDB_setCacheLowWaterMark_(SkipDB *self, size_t recordCount)
 {
 	self->cacheLowWaterMark = recordCount;
-	
+
 	if (recordCount > self->cacheHighWaterMark)
 	{
 		self->cacheHighWaterMark = recordCount * 2;
@@ -258,77 +258,77 @@ int SkipDB_headerIsEmpty(SkipDB *self)
 
 void SkipDB_freeExcessCachedRecords(SkipDB *self)
 {
-	// this is only called after a sync, so there are no dirty records 
+	// this is only called after a sync, so there are no dirty records
 	//return;
-	
+
 	if (self->cachedRecordCount > self->cacheHighWaterMark)
 	{
 		SkipDBRecord *r;
 		SkipDBRecord *lastMarkedRecord = NULL;
 		size_t lowMark = self->cacheLowWaterMark;
-		
+
 		//printf("SkipDB_freeExcessCachedRecords() start %i\n", (int)self->cachedRecordCount);
-		
-		// make sure we keep the header 
-		
+
+		// make sure we keep the header
+
 		SkipDB_noteAccessedRecord_(self, self->header);
 		r = self->youngestRecord;
-		
-		// mark the cursor records 
-		
+
+		// mark the cursor records
+
 		List_do_(self->cursors, (ListDoCallback *)SkipDBCursor_mark);
-		
-		// mark the recent records 
-		
+
+		// mark the recent records
+
 		while (lowMark --)
 		{
 			r->mark = 1;
 			r = r->olderRecord;
 		}
-		
-		// unmark the rest of the records 
-		
+
+		// unmark the rest of the records
+
 		while (r)
 		{
 			r->mark = 0;
 			r = r->olderRecord;
 		}
-		
-		// remove the references to older records 
-		
+
+		// remove the references to older records
+
 		lowMark = self->cacheLowWaterMark;
 		r = self->youngestRecord;
-		
+
 		while (r->mark)
 		{
 			lowMark --;
 			SkipDBRecord_removeReferencesToUnmarked(r);
-			lastMarkedRecord = r; // remember this so we can clip the list 
+			lastMarkedRecord = r; // remember this so we can clip the list
 			r = r->olderRecord;
 		}
-		
-		// dealloc the remaining records 
-		
+
+		// dealloc the remaining records
+
 		while (r)
 		{
 			SkipDBRecord *next = r->olderRecord;
-			
+
 			// to avoid SkipDBRecord_removeFromAgeList() issues
 			r->olderRecord   = NULL;
 			r->youngerRecord = NULL;
-			
+
 			if (r->mark)
 			{
 				printf("error - attempt to dealloc marked record\n");
 				exit(-1);
 			}
-			
+
 			SkipDBRecord_dealloc(r); // what about SkipDBRecord_removeFromAgeList()?
 			r = next;
 		}
-		
-		lastMarkedRecord->olderRecord = NULL; // clip the list 
-		
+
+		lastMarkedRecord->olderRecord = NULL; // clip the list
+
 		//printf("SkipDB_freeExcessCachedRecords() done %i\n", (int)self->cachedRecordCount);
 	}
 }
@@ -341,7 +341,7 @@ int SkipDB_isOpen(SkipDB *self)
 void SkipDB_clearCache(SkipDB *self)
 {
 	printf("\nclearCache\n\n");
-	
+
 	if (self->header)
 	{
 		SkipDB_freeAllCachedRecords(self);
@@ -349,7 +349,7 @@ void SkipDB_clearCache(SkipDB *self)
 	}
 }
 
-// transactions --------------------------------------------------- 
+// transactions ---------------------------------------------------
 
 void SkipDB_sync(SkipDB *self)
 {
@@ -359,12 +359,12 @@ void SkipDB_sync(SkipDB *self)
 		{
 			self->headerPid = SkipDBRecord_pidAllocIfNeeded(self->header);
 		}
-		
+
 		//SkipDB_removeDirtyRecordsFromSavedRecords(self);
 		SkipDB_saveDirtyRecords(self);
 		SkipDB_deleteRecordsToRemove(self);
 	}
-	
+
 	List_removeAll(self->dirtyRecords);
 	List_removeAll(self->pidsToRemove);
 	SkipDB_freeExcessCachedRecords(self);
@@ -388,24 +388,24 @@ void SkipDB_saveDirtyRecords(SkipDB *self)
 
 void SkipDB_deleteRecordsToRemove(SkipDB *self)
 {
-	UDB *udb = SkipDB_udb(self);	
+	UDB *udb = SkipDB_udb(self);
 	LIST_FOREACH(self->pidsToRemove, i, pid, UDB_removeAt_(udb, (PID_TYPE)pid));
 }
 
-// ops -------------------------------------------------- 
+// ops --------------------------------------------------
 
 void SkipDB_readRootRecord(SkipDB *self)
 {
 	SkipDBRecord *r = SkipDB_recordAtPid_(self, self->headerPid);
-	
-	if (!r) 
+
+	if (!r)
 	{
 		r = SkipDBRecord_newWithDB_(self);
 		SkipDBRecord_keyDatum_(r, Datum_Empty());
 		SkipDBRecord_markAsDirty(r);
 		self->headerPid = SkipDBRecord_pid(r);
 	}
-	
+
 	self->header = r;
 }
 
@@ -424,18 +424,18 @@ int SkipDB_pickRandomRecordLevel(SkipDB *self)
 {
 	float r = (float)RandomGen_randomDouble(self->randomGen);
 	int level = 1;
-	
+
 	while (r < self->p && level < SKIPDB_MAX_LEVEL)
 	{
 		level ++;
 		r = (float)RandomGen_randomDouble(self->randomGen);
 	}
-	
-	if (level > SkipDB_level(self)) 
+
+	if (level > SkipDB_level(self))
 	{
 		level = SkipDB_level(self) + 1;
 	}
-	
+
 	return level;
 }
 
@@ -444,7 +444,7 @@ SkipDBRecord *SkipDB_recordAtPid_(SkipDB *self, PID_TYPE pid)
 	if (pid)
 	{
 		SkipDBRecord *r = PHash_at_(self->pidToRecord, (void *)pid);
-		
+
 		if (r)
 		{
 			return r;
@@ -452,18 +452,18 @@ SkipDBRecord *SkipDB_recordAtPid_(SkipDB *self, PID_TYPE pid)
 		else
 		{
 			Datum d = UDB_at_(SkipDB_udb(self), pid);
-			
+
 			if (d.size)
 			{
 				SkipDBRecord *r = SkipDBRecord_newWithDB_(self);
-				BStream_setData_length_(self->stream, d.data, d.size); // need to optimize this out 
+				BStream_setData_length_(self->stream, d.data, d.size); // need to optimize this out
 				SkipDBRecord_fromStream_(r, self->stream);
 				SkipDBRecord_pid_(r, pid);
 				return r;
 			}
 		}
-		
-		if (pid != 1) 
+
+		if (pid != 1)
 		{
 			UDB *udb = SkipDB_udb(self);
 			printf("MISSING SKIP RECORD WITH PID: %" PID_FORMAT "\n", pid);
@@ -473,7 +473,7 @@ SkipDBRecord *SkipDB_recordAtPid_(SkipDB *self, PID_TYPE pid)
 	return NULL;
 }
 
-// lookups ----------------------------- 
+// lookups -----------------------------
 
 void SkipDB_updateAt_put_(SkipDB *self, int level, SkipDBRecord *r)
 {
@@ -484,14 +484,14 @@ void SkipDB_updateAt_put_(SkipDB *self, int level, SkipDBRecord *r)
 void SkipDB_clearUpdate(SkipDB *self)
 {
 	int i;
-	
+
 	for (i = 0; i < SKIPDB_MAX_LEVEL; i ++)
 	{
 		SkipDB_updateAt_put_(self, i, NULL);
-	} 
+	}
 }
 
-// Record API ------------------------------------- 
+// Record API -------------------------------------
 
 SkipDBRecord *SkipDB_recordAt_(SkipDB *self, Datum k)
 {
@@ -503,105 +503,105 @@ SkipDBRecord *SkipDB_recordAt_put_(SkipDB *self, Datum k, Datum v)
 {
 	SkipDBRecord *r = SkipDB_recordAt_(self, k);
 	//SkipDB_showUpdate(self);
-	
+
 	if (r)
 	{
-		// update record 
+		// update record
 		SkipDBRecord_valueDatum_(r, v);
 		SkipDBRecord_markAsDirty(r);
 	}
 	else
 	{
-		// create new record  
+		// create new record
 		r = SkipDBRecord_newWithDB_(self);
 		//printf("%p = SkipDBRecord_newWithDB_(self);\n", (void *)r);
-		
+
 		SkipDBRecord_keyDatum_(r, k);
 		SkipDBRecord_valueDatum_(r, v);
-		
-		// pick a level for it, and update header level if needed 
+
+		// pick a level for it, and update header level if needed
 		{
 			int level = SkipDB_pickRandomRecordLevel(self);
-			
+
 			//printf("picked level = %i\n", level);
 			SkipDBRecord_level_(r, level);
-			
+
 			if (level > SkipDB_level(self))
 			{
-				int i; 
-				
+				int i;
+
 				for (i = SkipDB_level(self); i < level; i ++)
 				{
 					SkipDB_updateAt_put_(self, i, self->header);
 				}
-				
+
 				SkipDB_level_(self, level);
 			}
 		}
-		
-		SkipDBRecord_markAsDirty(r); // need to do this to get a pid 
+
+		SkipDBRecord_markAsDirty(r); // need to do this to get a pid
 		//SkipDBRecord_show(r);
-		
-		// set the records in the update vector to point to the inserted record 
+
+		// set the records in the update vector to point to the inserted record
 		{
 			int level = SkipDBRecord_level(r);
-			
+
 			while (level --)
 			{
 				SkipDBRecord *updateRecord = self->update[level];
-				
-				if (updateRecord) 
+
+				if (updateRecord)
 				{
 					SkipDBRecord_copyLevel_from_(r, level, updateRecord);
 					/*
-					 printf("after: %s insert: %s\n", 
-						   UArray_asCString(updateRecord->key), 
+					 printf("after: %s insert: %s\n",
+						   UArray_asCString(updateRecord->key),
 						   UArray_asCString(r->key));
 					*/
-					
-					// update previous pointer 
+
+					// update previous pointer
 					// (r is to the right of the update records)
 					if (level == 0)
 					{
 						SkipDBRecord *nextRecord = SkipDBRecord_nextRecord(updateRecord);
 						SkipDBRecord_previousRecord_(r, updateRecord);
-						
+
 						if(nextRecord)
 						{
 							SkipDBRecord_previousRecord_(nextRecord, r);
 							SkipDBRecord_markAsDirty(nextRecord);
 						}
 					}
-					
+
 					SkipDBRecord_atLevel_setRecord_(updateRecord, level, r);
 					SkipDBRecord_markAsDirty(updateRecord);
 				}
 			}
 		}
-		
+
 		SkipDBRecord_markAsDirty(r);
 	}
-	
+
 	return r;
 }
 
-// Datum API ------------------------------------- 
+// Datum API -------------------------------------
 
 Datum SkipDB_at_(SkipDB *self, Datum k)
 {
 	SkipDBRecord *r;
-	
+
 	SkipDB_clearUpdate(self);
-	
+
 	r = SkipDBRecord_find_quick_(self->header, k, 1);
-	
+
 	//SkipDBRecord *r = SkipDB_recordAt_(self, k);
-	
+
 	if (r)
 	{
 		return Datum_FromUArray_(SkipDBRecord_value(r));
 	}
-	
+
 	return Datum_Empty();
 }
 
@@ -614,32 +614,32 @@ void SkipDB_removeAt_(SkipDB *self, Datum k)
 {
 	SkipDBRecord *r = SkipDB_recordAt_(self, k);
 	SkipDBRecord *lastUr = NULL;
-	
+
 	if (r)
 	{
 		int i;
-		
+
 		for (i = 0; i < SKIPDB_MAX_LEVEL; i ++)
 		{
 			SkipDBRecord *ur = self->update[i];
-			
-			if (ur == r) 
+
+			if (ur == r)
 			{
 				break;
 			}
-			
-			if (ur && ur != lastUr) 
+
+			if (ur && ur != lastUr)
 			{
 				SkipDBRecord_willRemove_(ur, r);
 			}
-			
-			// update previous pointer 
-			
+
+			// update previous pointer
+
 			if (i == 0)
 			{
 				SkipDBRecord *nextRecord = SkipDBRecord_nextRecord(r);
 				SkipDBRecord *previousRecord = SkipDBRecord_previousRecord(r);
-				
+
 				if (nextRecord)
 				{
 					SkipDBRecord_previousRecord_(nextRecord, previousRecord);
@@ -647,11 +647,11 @@ void SkipDB_removeAt_(SkipDB *self, Datum k)
 			}
 			lastUr = ur;
 		}
-		
+
 		if (SkipDB_isOpen(self))
 		{
 			PID_TYPE pid = SkipDBRecord_pid(r);
-			
+
 			if (pid)
 			{
 				List_append_(self->pidsToRemove, (void *)pid);
@@ -659,12 +659,12 @@ void SkipDB_removeAt_(SkipDB *self, Datum k)
 			}
 			//UDB_removeAt_(SkipDB_udb(self), SkipDBRecord_pid(r));
 		}
-		
-		// nothing should be pointing to this record, so we can dealloc it 
-		
+
+		// nothing should be pointing to this record, so we can dealloc it
+
 		//SkipDBRecord_object_(r, NULL);
 		SkipDBRecord_dealloc(r);
-		
+
 #ifdef DEBUG
 		if (SkipDB_recordAt_(self, k))
 		{
@@ -678,14 +678,14 @@ void SkipDB_removeAt_(SkipDB *self, Datum k)
 void SkipDB_showUpdate(SkipDB *self)
 {
 	int i = self->header->level;
-	
+
 	printf("SkipDB update vector:\n");
-	
+
 	while (i --)
 	{
 		printf("  %i : %s\n", i, UArray_asCString(SkipDBRecord_key(self->update[i])));
 	}
-	
+
 	printf("\n");
 }
 
@@ -701,7 +701,7 @@ void SkipDB_show(SkipDB *self)
 	printf("\n\n");
 }
 
-// objects -------------------------------------------------- 
+// objects --------------------------------------------------
 
 void SkipDB_objectMarkFunc_(SkipDB *self, SkipDBObjectMarkFunc *func)
 {
@@ -713,20 +713,20 @@ void SkipDB_freeObjectCallback_(SkipDB *self, SkipDBFreeObjectFunc *func)
 	self->objectFreeFunc = func;
 }
 
-// cursor --------------------------------- 
+// cursor ---------------------------------
 
 int SkipDB_count(SkipDB *self)
 {
 	int count = 0;
 	SkipDBRecord *r = SkipDB_firstRecord(self);
-	
-	if (!r) 
+
+	if (!r)
 	{
 		return 0;
 	}
-	
+
 	count = 1;
-	
+
 	while ((r = SkipDBRecord_nextRecord(r)))
 	{
 		count ++;
@@ -748,12 +748,12 @@ SkipDBRecord *SkipDB_lastRecord(SkipDB *self)
 SkipDBRecord *SkipDB_goto_(SkipDB *self, Datum key)
 {
 	SkipDBRecord *r = SkipDB_recordAt_(self, key);
-	
+
 	if (!r)
 	{
 		r = self->update[0];
 	}
-	
+
 	return r;
 }
 
@@ -771,16 +771,48 @@ void SkipDB_removeCursor_(SkipDB *self, SkipDBCursor *cursor)
 	//SkipDBCursor_free(cursor);
 }
 
-// moving from in-memory to on-disk --------------------------------- 
+// moving from in-memory to on-disk ---------------------------------
 
 void SkipDB_mergeInto_(SkipDB *self, SkipDB *other)
 {
 	SkipDBRecord *r = self->header;
-	
+
 	while ((r = SkipDBRecord_nextRecord(r)))
 	{
 		Datum k = SkipDBRecord_keyDatum(r);
 		Datum v = SkipDBRecord_valueDatum(r);
 		SkipDB_at_put_(other, k, v);
 	}
+}
+
+void SkipDB_list_prefix(SkipDB* self, Datum k, void* ctx, skipdb_list_callback callback)
+{
+	Datum t;
+    SkipDBCursor* cursor = SkipDB_createCursor(self);
+    SkipDBRecord* rc = SkipDBCursor_goto_(cursor, k);
+    if(NULL == rc) {
+        goto list_finish;
+    }
+
+    t = SkipDBRecord_valueDatum(rc);
+    //printf("k.size=%d t.size=%d k=%s t=%s\n", k.size, t.size, k.data, t.data);
+    if((k.size <= t.size) && (0 == strncmp((char*)t.data, (char*)k.data, k.size-1))) {
+        (*callback)(self, rc, ctx);
+    }
+
+    rc = SkipDBCursor_next(cursor);
+    while(NULL != rc) {
+        t = SkipDBRecord_valueDatum(rc);
+        if((k.size <= t.size) && (0 == strncmp((char*)t.data, (char*)k.data, k.size-1))) {
+            (*callback)(self, rc, ctx);
+            rc = SkipDBCursor_next(cursor);
+        } else {
+            break;
+        }
+    }
+
+list_finish:
+    if(NULL != cursor) {
+        SkipDBCursor_release(cursor);
+    }
 }

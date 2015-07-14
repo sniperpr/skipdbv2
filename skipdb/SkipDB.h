@@ -1,7 +1,7 @@
 /*#io
 docCopyright("Steve Dekorte", 2004)
 docLicense("BSD revised")
-docObject("SkipDB")    
+docObject("SkipDB")
 docDescription("A sorted key/value pair database implemented with skip lists on top of UDB.")
 */
 
@@ -28,23 +28,23 @@ docDescription("A sorted key/value pair database implemented with skip lists on 
 extern "C" {
 #endif
 
-// if prob. dist = 0.5, then max level 32 is enough for 2^32 records 
+// if prob. dist = 0.5, then max level 32 is enough for 2^32 records
 
 #define SKIPDB_MAX_LEVEL 32
-#define SKIPDB_PROBABILITY_DISTRIBUTION 0.5 
+#define SKIPDB_PROBABILITY_DISTRIBUTION 0.5
 
 typedef void (SkipDBObjectMarkFunc)(void *);
 typedef void (SkipDBFreeObjectFunc)(void *);
-    
+
 typedef struct
 {
 	UDB *udb;
-	
+
     void *dbm;
     PID_TYPE headerPid;
-    SkipDBRecord *header; 
-    SkipDBRecord *youngestRecord; // most recently accessed 
-    
+    SkipDBRecord *header;
+    SkipDBRecord *youngestRecord; // most recently accessed
+
     SkipDBRecord *update[SKIPDB_MAX_LEVEL];
     float p;
 
@@ -52,14 +52,14 @@ typedef struct
     SkipDBObjectMarkFunc *objectMarkFunc;
     SkipDBFreeObjectFunc *objectFreeFunc;
     List *cursors;
-    
+
     List *dirtyRecords;
     List *pidsToRemove;
-    
-    size_t cachedRecordCount; 
+
+    size_t cachedRecordCount;
     size_t cacheHighWaterMark;
     size_t cacheLowWaterMark;
-    unsigned char mark; // current record mark identifier 
+    unsigned char mark; // current record mark identifier
     PHash *pidToRecord;
     RandomGen *randomGen;
 } SkipDB;
@@ -85,7 +85,7 @@ SKIPDB_API UDB *SkipDB_udb(SkipDB *self);
 SKIPDB_API int SkipDB_isOpen(SkipDB *self);
 SKIPDB_API void SkipDB_delete(SkipDB *self);
 
-// notifications 
+// notifications
 
 SKIPDB_API void SkipDB_noteNewRecord_(SkipDB *self, SkipDBRecord *r);
 SKIPDB_API void SkipDB_noteAccessedRecord_(SkipDB *self, SkipDBRecord *r);
@@ -93,7 +93,7 @@ SKIPDB_API void SkipDB_noteDirtyRecord_(SkipDB *self, SkipDBRecord *r);
 SKIPDB_API void SkipDB_noteAssignedPidToRecord_(SkipDB *self, SkipDBRecord *r);
 SKIPDB_API void SkipDB_noteWillFreeRecord_(SkipDB *self, SkipDBRecord *r);
 
-// cache 
+// cache
 
 SKIPDB_API void SkipDB_setCacheHighWaterMark_(SkipDB *self, size_t recordCount);
 SKIPDB_API size_t SkipDB_cacheHighWaterMark(SkipDB *self);
@@ -115,7 +115,7 @@ SKIPDB_API void SkipDB_removeDirtyRecordsFromSavedRecords(SkipDB *self);
 SKIPDB_API void SkipDB_saveDirtyRecords(SkipDB *self);
 void SkipDB_deleteRecordsToRemove(SkipDB *self);
 
-// record api 
+// record api
 
 SKIPDB_API SkipDBRecord *SkipDB_recordAt_(SkipDB *self, Datum k);
 SKIPDB_API SkipDBRecord *SkipDB_recordAt_put_(SkipDB *self, Datum k, Datum v);
@@ -130,7 +130,7 @@ SKIPDB_API void SkipDB_removeAt_(SkipDB *self, Datum k);
 
 SKIPDB_API int SkipDB_compact(SkipDB *self);
 
-// debugging 
+// debugging
 
 SKIPDB_API void SkipDB_showUpdate(SkipDB *self);
 SKIPDB_API void SkipDB_show(SkipDB *self);
@@ -156,9 +156,12 @@ SKIPDB_API SkipDBRecord *SkipDB_goto_(SkipDB *self, Datum key);
 SKIPDB_API SkipDBCursor *SkipDB_createCursor(SkipDB *self);
 SKIPDB_API void SkipDB_removeCursor_(SkipDB *self, SkipDBCursor *cursor);
 
-// moving from in-memory to on-disk 
+// moving from in-memory to on-disk
 
 SKIPDB_API void SkipDB_mergeInto_(SkipDB *self, SkipDB *other);
+
+typedef void (*skipdb_list_callback)(SkipDB* self, SkipDBRecord* rc, void* ctx);
+SKIPDB_API void SkipDB_list_prefix(SkipDB* self, Datum k, void* ctx, skipdb_list_callback callback);
 
 #ifdef __cplusplus
 }
