@@ -13,6 +13,7 @@
 #include <sys/un.h>
 #include <ev.h>
 
+#include "coroutine.h"
 #include "SkipDB.h"
 
 #define offsetof(TYPE, MEMBER) ((size_t) &((TYPE *)0)->MEMBER)
@@ -42,15 +43,18 @@ typedef struct _skipd_server {
 typedef struct _skipd_client {
     ev_io io_read;
     ev_io io_write;
+    struct ccrContextTag ccr;
     int fd;
+    int state;
 
     char command[COMMAND_LEN+1];
     char key[KEY_LEN+1];
     int data_len;
 
-    int pos;
-    int len;
-    int max;
+    char* curr;
+    char* origin;
+    int curr_len;
+    int origin_len;
     skipd_server* server;
 } skipd_client;
 
@@ -69,48 +73,77 @@ static void client_release(EV_P_ skipd_client* client) {
     free(client);
 }
 
+static int client_read_buf(skipd_client* client, char* buf, int len) {
+    int n = recv(client->fd, buf, len, 0);
+    if (0 == n) {
+        return -1;
+    } else if(n < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return 0;
+        } else {
+            return -1;
+        }
+    }
+
+    return n;
+}
+
 // This callback is called when client data is available
 static void client_read(EV_P_ ev_io *w, int revents) {
     skipd_client* client = container_of(w, skipd_client, io_read);
-    int n;
-    if(NULL == client->buf) {
-        client->buf = (char*)malloc(BUF_MAX);
-        client->len = 0;
-        client->pos = 0;
-        client->max = BUF_MAX;
-    }
-
-    assert(0 == client->pos);
-    n = recv(client->fd, client->buf, client->max, 0);
-    if (0 == n) {
-        // an orderly disconnect
-        puts("orderly disconnect");
-        client_release(client);
-        return;
-    } else if(n < 0) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            return
-        } else {
-            puts("recv error");
-            client_release(client);
-            return;
-        }
-    }
-    printf("socket recv len=%d\n", n);
-    client->len = n;
 
     //process command
     ;
 }
 
 static void client_write(EV_P_ ev_io *w, int revents) {
-    skipd_client* client = container_of(w, skipd_client, io_read);
+    skipd_client* client = container_of(w, skipd_client, io_write);
     int n;
+}
+
+static int client_ccr(EV_P_, skipd_client* client) {
+    int n, left = 0;
+    char* buf = NULL;
+    struct ccrContextTag* ctx = &client->ccr;
+
+    //intial before in coroutine
+    if(NULL != client->origin) {
+        buf = client->curr;
+        left = client->origin_len - (client->curr + client->curr_len - client->origin);
+    }
+
+    ccrBegin(ctx);
+
+    //initial first time in coroutine
+    if(NULL == client->origin) {
+        client->origin = (char*)malloc(BUF_MAX);
+        client->curr = client->origin;
+        client->origin_len = BUF_MAX;
+        client->curr_len = 0;
+        left = client->origin_len - (client->curr + client->curr_len - client->origin);
+        buf = client->curr;
+    }
+
+    for(;;) {
+        assert(left > COMMAND_LEN);
+        n = client_read_buf(client, buf, COMMAND_LEN);
+        if(n < 0) {
+            ccrReturn(ctx, -1);
+        }
+        if(n == 0) {
+            //continue
+            ccrReturn(ctx, 1);
+        }
+
+        buf[COMMAND_LEN] = '\0';
+        //TODO search space
+    }
+    ccrFinish(ctx, 0);
 }
 
 static struct skipd_client* client_new(int fd) {
     int opt = 1;
-    struct sock_ev_client* client = realloc(NULL, sizeof(skipd_client));
+    skipd_client* client = (skipd_client*)calloc(1, sizeof(skipd_client));
     client->fd = fd;
     client->buf = NULL;
 
