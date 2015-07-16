@@ -26,6 +26,11 @@
 #define KEY_LEN 128
 #define BUF_MAX 2048
 
+#define _min(a,b) \
+   ({ __typeof__ (a) _a = (a); \
+       __typeof__ (b) _b = (b); \
+     _a > _b ? _b : _a; })
+
 typedef struct _skipd_server {
     ev_io io;
     int fd;
@@ -51,6 +56,8 @@ typedef struct _skipd_client {
     ev_io io_write;
     struct ccrContextTag ccr_read;
     struct ccrContextTag ccr_write;
+    struct ccrContextTag ccr_process;
+    struct ccrContextTag ccr_runcmd;
     int fd;
     int closing;
 
@@ -58,15 +65,16 @@ typedef struct _skipd_client {
     char key[KEY_LEN+1];
     int data_len;
 
-    char* curr;
     char* origin;
-    int curr_len;
     int origin_len;
+    int read_len;
+    int read_pos;
 
     char* send;
     int send_max;
     int send_len;
     int send_pos;
+
     skipd_server* server;
 } skipd_client;
 
@@ -154,7 +162,7 @@ static int client_send(EV_P_ skipd_client* client, char* buf, int len) {
     }
 
     n = sprintf(client->send, "%s %s %s ", pc, pk, len_buf);
-    memcpy(client->send+n, buf, len);
+    memcpy(client->send + n, buf, len);
     client->send[resp_len] = '\0';
     client->send_len = resp_len;
     client->send_pos = 0;
@@ -198,51 +206,119 @@ static int client_ccr_write(EV_P_ skipd_client* client) {
     ccrFinish(ctx, 0);
 }
 
-static int client_ccr_read(EV_P_ skipd_client* client) {
-    int n, left = 0;
-    char *p, *buf = NULL;
+static int client_ccr_read_util(skidp_client* client, char uc, int step_len) {
     struct ccrContextTag* ctx = &client->ccr_read;
 
-    //intial before in coroutine
-    if(NULL != client->origin) {
-        buf = client->curr;
-        left = client->origin_len - (client->curr + client->curr_len - client->origin);
-    }
+    //stack
+    ccrBeginContext
+    int n;
+    int left;
+    ccrEndContext(ctx)
 
-    ccrBegin(ctx);
-
-    //initial first time in coroutine
+    ccrBegn(ctx);
     if(NULL == client->origin) {
         client->origin = (char*)malloc(BUF_MAX);
-        client->curr = client->origin;
         client->origin_len = BUF_MAX;
-        client->curr_len = 0;
-        left = client->origin_len - (client->curr + client->curr_len - client->origin);
-        buf = client->curr;
+        client->read_pos = 0;
+        client->read_len = 0;
     }
 
     for(;;) {
-        assert(left > COMMAND_LEN);
-        client->command[0] = 0;
-        n = client_read_buf(client, buf, COMMAND_LEN);
-        if(n < 0) {
-            //error occur, return and exit
-            ccrReturn(ctx, -1);
-        }
-        if(n == 0) {
-            //Nothing read, wait for next time
-            ccrReturn(ctx, 1);
-        }
-
-        buf[COMMAND_LEN] = '\0';
-        p = strstr(buf, " ");
-        if(NULL == p) {
-            //ERROR switch to write a error to client
-            p = "command no found";
-            client_send(EV_A_ client, p, strlen(p));
-            client->closing = 1;
+        CS->left = _min(client->origin_len - client->read_len, step_len);
+        if(0 == CS->left) {
             ccrReturn(ctx, -2);
         }
+
+        CS->n = recv(client->fd, client->origin + client->pos, CS->left, 0);
+        if (0 == CS->n) {
+            ccrReturn(ctx, -1);
+        } else if(CS->n < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                ccrReturn(ctx, 0);
+            } else {
+                ccrReturn(ctx, -1);
+            }
+        }
+        client->read_len += CS->n;
+
+        for(; client->pos < client->client->read_len; client->pos++) {
+            if(client->origin[client->pos] == uc) {
+                ccrReturn(1);
+            }
+        }
+    }
+    ccrFinish(ctx);
+}
+
+static int client_run_command(EV_P_ skipd_client* client) {
+    struct ccrContextTag* ctx = &client->ccr_runcmd;
+
+    ccrBeginContext
+    ccrEndContext(ctx)
+
+    if(!strcmp(client->command, "set")) {
+    } else if(!strcmp(client->command, "get")) {
+    } else if(!strcmp(client->command, "list")) {
+    } else if(!strcmp(client->command, "delay")) {
+    }
+}
+
+static int client_ccr_process(EV_P_ skipd_client* client) {
+    int rt;
+    struct ccrContextTag* ctx = &client->ccr_process;
+
+    //stack
+    ccrBeginContext
+    int n;
+    int left;
+    ccrEndContext(ctx)
+
+    ccrBegin(ctx);
+
+    for(;;) {
+        client->command[0] = '\0';
+        memset(&client->ccr_read, 0, sizeof(struct ccrContextTag));
+        do {
+            rt = client_ccr_read_util(client, ' ', COMMAND_LEN);
+            if(-1 == rt) {
+                ccrReturn(ctx, -1);
+            } else ( rt < 0) {
+                p = "command no found";
+                client_send(EV_A_ client, p, strlen(p));
+                client->closing = 1;
+                ccrReturn(ctx, rt);
+            }
+        } while(1 == rt);
+
+        strncpy(client->command, client->origin, client->read_pos);
+        if(client->read_len > client->read_len) {
+            memmove(client->origin, client->origin + client->read_pos + 1, client->read_len - client->read_pos - 1);
+        }
+        client->read_len -= 1;
+        client->read_pos = 0;
+
+        client->key[0] = '\0';
+        memset(&client->ccr_read, 0, sizeof(struct ccrContextTag));
+        do {
+            rt = client_ccr_read_util(client, ' ', KEY_LEN);
+            if(-1 == rt) {
+                ccrReturn(ctx, -1);
+            } else ( rt < 0) {
+                p = "key no found";
+                client_send(EV_A_ client, p, strlen(p));
+                client->closing = 1;
+                ccrReturn(ctx, rt);
+            }
+        }while(1 == rlt);
+        strncpy(client->key, client->origin, client->read_pos);
+        if(client->read_len > client->read_len) {
+            memmove(client->origin, client->origin + client->read_pos + 1, client->read_len - client->read_pos - 1);
+        }
+        client->read_len -= 1;
+        client->read_pos = 0;
+
+        memset(&client->ccr_runcmd, 0, sizeof(struct ccrContextTag));
+        client_run_command(client);
     }
     ccrFinish(ctx, 0);
 }

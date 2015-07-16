@@ -8,12 +8,12 @@
 
 #include <stdlib.h>
 
-#define COROUTINE_CONTEXT_LEN 	128
+#define COROUTINE_CONTEXT_LEN 	64
 
 struct ccrContextTag {
     int ccrLine;
-    /* 协程中用于临时内存交换
-    unsigned char stack_buf[COROUTINE_CONTEXT_LEN]; */
+    /* 协程中用于临时内存交换 */
+    unsigned char stack_buf[COROUTINE_CONTEXT_LEN]; 
 };
 
  /* assert(sizeof(struct _stack_##__FUNCTION__) < COROUTINE_CONTEXT_LEN)
@@ -22,7 +22,7 @@ struct ccrContextTag {
 #define TOKENPASTE2(x, y) 	TOKENPASTE(x, y)
 #define TYPE_UNIQUE 			TOKENPASTE2(_statck_, __LINE__)
 #define ccrBeginContext  typedef struct TYPE_UNIQUE {
-#define ccrEndContext(x) } TYPE_UNIQUE; TYPE_UNIQUE *pstack; do { pstack = (TYPE_UNIQUE*)(&((x)->context.stack_buf[0]));} while(0)
+#define ccrEndContext(x) } TYPE_UNIQUE; TYPE_UNIQUE *CS; do { CS = (TYPE_UNIQUE*)(&((x)->stack_buf[0]));} while(0)
 
 #define ccrBegin(x)      if (x){ 			\
                          switch((x)->ccrLine) { case 0:;
