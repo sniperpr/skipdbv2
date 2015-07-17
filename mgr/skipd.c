@@ -10,16 +10,18 @@
 #include <time.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <sys/un.h>
 #include <ev.h>
 
 #include "coroutine.h"
 #include "SkipDB.h"
 
-#define offsetof(TYPE, MEMBER) ((size_t) &((TYPE *)0)->MEMBER)
+#define offsetof2(TYPE, MEMBER) ((size_t) &((TYPE *)0)->MEMBER)
 #define container_of(ptr, type, member) ({                      \
         const typeof( ((type *)0)->member ) *__mptr = (const typeof( ((type *)0)->member )*)(ptr);    \
-        (type *)( (char *)__mptr - offsetof(type,member) );})
+        (type *)( (char *)__mptr - offsetof2(type,member) );})
 
 #define PATH_MAX 128
 #define COMMAND_LEN 32
@@ -78,359 +80,73 @@ typedef struct _skipd_client {
     skipd_server* server;
 } skipd_client;
 
-int setnonblock(int fd);
+/* declare */
+static int setnonblock(int fd);
 static void not_blocked(EV_P_ ev_periodic *w, int revents);
+static int client_ccr_process(EV_P_ skipd_client* client);
+static int client_ccr_write(EV_P_ skipd_client* client);
 
-static void client_release(EV_P_ skipd_client* client) {
-    ev_io_stop(EV_A_ &client->io_read);
-    ev_io_stop(EV_A_ &client->io_write);
-    close(client->fd);
 
-    if(NULL != client->buf) {
-        free(client->buf);
-    }
+skipd_server global_server;
+int pid_daemon;
+static char *lock_path;
 
-    free(client);
-}
-
-static int client_read_buf(skipd_client* client, char* buf, int len) {
-    int n = recv(client->fd, buf, len, 0);
-    if (0 == n) {
-        return -1;
-    } else if(n < 0) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            return 0;
-        } else {
-            return -1;
-        }
-    }
-
-    return n;
-}
-
-// This callback is called when client data is available
-static void client_read(EV_P_ ev_io *w, int revents) {
-    skipd_client* client = container_of(w, skipd_client, io_read);
-
-    //process command
-    ;
-}
-
-static void client_write(EV_P_ ev_io *w, int revents) {
-    skipd_client* client = container_of(w, skipd_client, io_write);
-    int n;
-}
-
-#define UNKNOWN_LEN 8
-static int client_send(EV_P_ skipd_client* client, char* buf, int len) {
-    static char* unknown = "unknown";
-    char len_buf[10], *pc, *pk;
-    int n, clen = strlen(client->command);
-    int klen = strlen(client->key);
-
-    int resp_len = len;
-    if(0 == clen) {
-        pc = unknown;
-        resp_len += UNKNOWN_LEN;
-    } else {
-        pc = client->command;
-        resp_len += clen;
-    }
-    if(0 == klen) {
-        pk = unknown;
-        resp_len += UNKNOWN_LEN;
-    } else {
-        pk = client->key;
-        resp_len += klen;
-    }
-
-    len_buf[0] = '\0';
-    sprintf(len_buf, "%d", len);
-    resp_len += strlen(len_buf) + 3;
-
-    if(NULL == client->send) {
-        client->send = (char*)malloc(BUF_MAX);
-        client->send_max = BUF_MAX;
-        client->send_len = 0;
-    }
-
-    if(resp_len > client->send_max) {
-        free(client->send);
-        client->send = (char*)malloc(resp_len);
-        client->send_max = resp_len;
-        client->send_len = 0;
-    }
-
-    n = sprintf(client->send, "%s %s %s ", pc, pk, len_buf);
-    memcpy(client->send + n, buf, len);
-    client->send[resp_len] = '\0';
-    client->send_len = resp_len;
-    client->send_pos = 0;
-
-    //switch to read state
-    memset(&client->ccr_write, 0, sizeof(struct ccrContextTag));
-    ev_io_stop(EV_A_ &client->io_read);
-    ev_io_start(EV_A_ &client->io_write);
-
-    return 0;
-}
-
-static int client_ccr_write(EV_P_ skipd_client* client) {
-    int n = 0;
-    struct ccrContextTag* ctx = &client->ccr_write;
-
-    ccrBegin(ctx);
-    while(client->send_pos < client->send_len) {
-        n = write(client->fd, client->send + client->send_pos, client->send_len - client->send_pos);
-        if(n < 0) {
-            if(errno == EINTR || errno == EAGAIN) {
-                ccrReturn(ctx, 1);
-            } else {
-                fprintf(stderr, "write sock error, line=%d\n", __LINE__);
-                ccrReturn(ctx, -2);
-            }
-        }
-
-        if((client->send_len -= n) > 0) {
-            //write again
-            client->send_pos += n;
-            ccrReturn(ctx, 2);
-        } else {
-            //Finished write
-            client->send_len = 0;
-            client->send_pos = 0;
-            ev_io_stop(EV_A_ &client->io_write);
-            ev_io_start(EV_A_ &client->io_read);
-        }
-    }
-    ccrFinish(ctx, 0);
-}
-
-static int client_ccr_read_util(skidp_client* client, char uc, int step_len) {
-    struct ccrContextTag* ctx = &client->ccr_read;
-
-    //stack
-    ccrBeginContext
-    int n;
-    int left;
-    ccrEndContext(ctx)
-
-    ccrBegn(ctx);
-    if(NULL == client->origin) {
-        client->origin = (char*)malloc(BUF_MAX);
-        client->origin_len = BUF_MAX;
-        client->read_pos = 0;
-        client->read_len = 0;
-    }
-
-    for(;;) {
-        CS->left = _min(client->origin_len - client->read_len, step_len);
-        if(0 == CS->left) {
-            ccrReturn(ctx, -2);
-        }
-
-        CS->n = recv(client->fd, client->origin + client->pos, CS->left, 0);
-        if (0 == CS->n) {
-            ccrReturn(ctx, -1);
-        } else if(CS->n < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                ccrReturn(ctx, 0);
-            } else {
-                ccrReturn(ctx, -1);
-            }
-        }
-        client->read_len += CS->n;
-
-        for(; client->pos < client->client->read_len; client->pos++) {
-            if(client->origin[client->pos] == uc) {
-                ccrReturn(1);
-            }
-        }
-    }
-    ccrFinish(ctx);
-}
-
-static int client_run_command(EV_P_ skipd_client* client) {
-    struct ccrContextTag* ctx = &client->ccr_runcmd;
-
-    ccrBeginContext
-    ccrEndContext(ctx)
-
-    if(!strcmp(client->command, "set")) {
-    } else if(!strcmp(client->command, "get")) {
-    } else if(!strcmp(client->command, "list")) {
-    } else if(!strcmp(client->command, "delay")) {
-    }
-}
-
-static int client_ccr_process(EV_P_ skipd_client* client) {
-    int rt;
-    struct ccrContextTag* ctx = &client->ccr_process;
-
-    //stack
-    ccrBeginContext
-    int n;
-    int left;
-    ccrEndContext(ctx)
-
-    ccrBegin(ctx);
-
-    for(;;) {
-        client->command[0] = '\0';
-        memset(&client->ccr_read, 0, sizeof(struct ccrContextTag));
-        do {
-            rt = client_ccr_read_util(client, ' ', COMMAND_LEN);
-            if(-1 == rt) {
-                ccrReturn(ctx, -1);
-            } else ( rt < 0) {
-                p = "command no found";
-                client_send(EV_A_ client, p, strlen(p));
-                client->closing = 1;
-                ccrReturn(ctx, rt);
-            }
-        } while(1 == rt);
-
-        strncpy(client->command, client->origin, client->read_pos);
-        if(client->read_len > client->read_len) {
-            memmove(client->origin, client->origin + client->read_pos + 1, client->read_len - client->read_pos - 1);
-        }
-        client->read_len -= 1;
-        client->read_pos = 0;
-
-        client->key[0] = '\0';
-        memset(&client->ccr_read, 0, sizeof(struct ccrContextTag));
-        do {
-            rt = client_ccr_read_util(client, ' ', KEY_LEN);
-            if(-1 == rt) {
-                ccrReturn(ctx, -1);
-            } else ( rt < 0) {
-                p = "key no found";
-                client_send(EV_A_ client, p, strlen(p));
-                client->closing = 1;
-                ccrReturn(ctx, rt);
-            }
-        }while(1 == rlt);
-        strncpy(client->key, client->origin, client->read_pos);
-        if(client->read_len > client->read_len) {
-            memmove(client->origin, client->origin + client->read_pos + 1, client->read_len - client->read_pos - 1);
-        }
-        client->read_len -= 1;
-        client->read_pos = 0;
-
-        memset(&client->ccr_runcmd, 0, sizeof(struct ccrContextTag));
-        client_run_command(client);
-    }
-    ccrFinish(ctx, 0);
-}
-
-static struct skipd_client* client_new(int fd) {
-    int opt = 1;
-    skipd_client* client = (skipd_client*)calloc(1, sizeof(skipd_client));
-    client->fd = fd;
-    client->buf = NULL;
-
-    setsockopt(remotefd, SOL_TCP, TCP_NODELAY, &opt, sizeof(opt));
-    setnonblock(client->fd);
-    ev_io_init(&client->io_read, client_read, client->fd, EV_READ);
-    ev_io_init(&client->io_write, client_write, client->fd, EV_WRITE);
-
-    return client;
-}
-
-// This callback is called when data is readable on the unix socket.
-static void server_cb(EV_P_ ev_io *w, int revents) {
-    puts("unix stream socket has become readable");
-
-    int client_fd;
-    struct skipd_client* client;
-
-    skipd_server* server = container_of(w, skipd_server, io);
-
-    while (1) {
-        client_fd = accept(server->fd, NULL, NULL);
-        if( client_fd == -1 ) {
-            if( errno != EAGAIN && errno != EWOULDBLOCK ) {
-                fprintf(stderr, "accept() failed errno=%i (%s)",  errno, strerror(errno));
-                exit(EXIT_FAILURE);
-            }
-            break;
-        }
-
-        puts("accepted a client");
-        client = client_new(client_fd);
-        client->server = server;
-        client->index = array_push(&server->clients, client);
-        ev_io_start(EV_A_ &client->io_read);
-    }
-}
-
-// Simply adds O_NONBLOCK to the file descriptor of choice
-int setnonblock(int fd)
+int get_daemonize_pid()
 {
-    int flags;
-
-    flags = fcntl(fd, F_GETFL);
-    flags |= O_NONBLOCK;
-    return fcntl(fd, F_SETFL, flags);
+	return pid_daemon;
 }
 
-int unix_socket_init(struct sockaddr_un* socket_un, char* sock_path, int max_queue) {
-    int fd;
-    int opt = 1;
+static void
+child_handler(int signum)
+{
+	int fd;
+	int len;
+	int sent;
+	char sz[20];
 
-    unlink(sock_path);
+	switch (signum) {
 
-    // Setup a unix socket listener.
-    fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (-1 == fd) {
-        perror("echo server socket");
-        exit(EXIT_FAILURE);
-    }
+	case SIGALRM: /* timedout daemonizing */
+		exit(1);
+		break;
 
-    setsockopt(fd, SOL_TCP, TCP_NODELAY, &opt, sizeof(opt));
+	case SIGUSR1: /* positive confirmation we daemonized well */
+		/* Create the lock file as the current user */
 
-    // Set it non-blocking
-    if (-1 == setnonblock(fd)) {
-        perror("echo server socket nonblock");
-        exit(EXIT_FAILURE);
-    }
+		fd = open(lock_path, O_TRUNC | O_RDWR | O_CREAT, 0640);
+		if (fd < 0) {
+			fprintf(stderr,
+			   "unable to create lock file %s, code=%d (%s)\n",
+				lock_path, errno, strerror(errno));
+			exit(1);
+		}
+		len = sprintf(sz, "%u", pid_daemon);
+		sent = write(fd, sz, len);
+		if (sent != len)
+			fprintf(stderr,
+			  "unable write pid to lock file %s, code=%d (%s)\n",
+					     lock_path, errno, strerror(errno));
 
-    // Set it as unix socket
-    socket_un->sun_family = AF_UNIX;
-    strcpy(socket_un->sun_path, sock_path);
+		close(fd);
+		exit(!!(sent == len));
 
-    return fd;
+	case SIGCHLD: /* daemonization failed */
+		exit(1);
+		break;
+	}
 }
 
-int server_init(skipd_server* server, int max_queue) {
-    server->db = SkipDB_new();
-    SkipDB_setPath_(server->db, server->db_path);
-    SkipDB_open(server->db);
+static void daemon_closing(int sigact)
+{
+	if (getpid() == pid_daemon)
+		if (lock_path) {
+			unlink(lock_path);
+		}
 
-    server->fd = unix_socket_init(&server->socket, server->sock_path, max_queue);
-    server->socket_len = sizeof(server->socket.sun_family) + strlen(server->socket.sun_path);
-
-    if (-1 == bind(server->fd, (struct sockaddr*) &server->socket, server->socket_len)) {
-        perror("echo server bind");
-        exit(EXIT_FAILURE);
-    }
-
-    if (-1 == listen(server->fd, max_queue)) {
-        perror("listen");
-        exit(EXIT_FAILURE);
-    }
-    return 0;
+	kill(getpid(), SIGKILL);
 }
 
-static struct option options[] = {
-    { "help",	no_argument,		NULL, 'h' },
-    { "db_path", required_argument,	NULL, 'd' },
-    { "sock_path", required_argument,	NULL, 's' },
-    { "daemon", 	required_argument,	NULL, 'D' },
-    { NULL, 0, 0, 0 }
-};
-
-int skipd_daemonize(const char *lock_path)
+int skipd_daemonize(char *_lock_path)
 {
 	pid_t sid, parent;
 	int fd;
@@ -442,7 +158,7 @@ int skipd_daemonize(const char *lock_path)
 	if (getppid() == 1)
 		return 1;
 
-	fd = open(lock_path, O_RDONLY);
+	fd = open(_lock_path, O_RDONLY);
 	if (fd >= 0) {
 		n = read(fd, buf, sizeof(buf));
 		close(fd);
@@ -457,9 +173,11 @@ int skipd_daemonize(const char *lock_path)
 			fprintf(stderr,
 			    "Removing stale lock file %s from dead pid %d\n",
 								 _lock_path, n);
-			unlink(lock_path);
+			unlink(_lock_path);
 		}
 	}
+
+    lock_path = _lock_path;
 
 	/* Trap signals that we expect to recieve */
 	signal(SIGCHLD, child_handler);	/* died */
@@ -539,7 +257,7 @@ int skipd_daemonize(const char *lock_path)
 	/* Tell the parent process that we are A-okay */
 	kill(parent, SIGUSR1);
 
-	act.sa_handler = lws_daemon_closing;
+	act.sa_handler = daemon_closing;
 	sigemptyset(&act.sa_mask);
 	act.sa_flags = 0;
 
@@ -550,14 +268,414 @@ int skipd_daemonize(const char *lock_path)
 	return 0;
 }
 
+static void client_release(EV_P_ skipd_client* client) {
+    ev_io_stop(EV_A_ &client->io_read);
+    ev_io_stop(EV_A_ &client->io_write);
+    close(client->fd);
+
+    if(NULL != client->send) {
+        free(client->send);
+    }
+
+    if(NULL != client->origin) {
+        free(client->origin);
+    }
+
+    free(client);
+}
+
+// This callback is called when client data is available
+static void client_read(EV_P_ ev_io *w, int revents) {
+    skipd_client* client = container_of(w, skipd_client, io_read);
+    int rt;
+
+    //process command
+    assert(client->closing == 0);
+
+    rt = client_ccr_process(EV_A_ client);
+    if(-1 == rt) {
+        //Close it directly
+        client_release(EV_A_ client);
+    } else if(rt < 0) {
+        if(client->closing) {
+            //wait for waiting completely
+            if(0 == client->send_len) {
+                //close it
+                client_release(EV_A_ client);
+            } else {
+                memset(&client->ccr_process, 0, sizeof(struct ccrContextTag));
+            }
+        }
+    } else {
+        //reset
+        memset(&client->ccr_process, 0, sizeof(struct ccrContextTag));
+    }
+}
+
+static void client_write(EV_P_ ev_io *w, int revents) {
+    skipd_client* client = container_of(w, skipd_client, io_write);
+    int rt;
+
+    rt = client_ccr_write(EV_A_ client);
+    if(rt < 0) {
+        client_release(EV_A_ client);
+    } else if(0 == rt) {
+        if(client->closing) {
+            client_release(EV_A_ client);
+        } else {
+            //reset it
+            memset(&client->ccr_write, 0, sizeof(struct ccrContextTag));
+        }
+    }
+}
+
+#define UNKNOWN_LEN 8
+static int client_send(EV_P_ skipd_client* client, char* buf, int len) {
+    static char* unknown = "unknown";
+    char len_buf[10], *pc, *pk;
+    int n, clen = strlen(client->command);
+    int klen = strlen(client->key);
+
+    int resp_len = len;
+    if(0 == clen) {
+        pc = unknown;
+        resp_len += UNKNOWN_LEN;
+    } else {
+        pc = client->command;
+        resp_len += clen;
+    }
+    if(0 == klen) {
+        pk = unknown;
+        resp_len += UNKNOWN_LEN;
+    } else {
+        pk = client->key;
+        resp_len += klen;
+    }
+
+    len_buf[0] = '\0';
+    sprintf(len_buf, "%d", len);
+    resp_len += strlen(len_buf) + 3;
+
+    if(NULL == client->send) {
+        client->send = (char*)malloc(BUF_MAX);
+        client->send_max = BUF_MAX;
+        client->send_len = 0;
+    }
+
+    if(resp_len > client->send_max) {
+        free(client->send);
+        client->send = (char*)malloc(resp_len);
+        client->send_max = resp_len;
+        client->send_len = 0;
+    }
+
+    n = sprintf(client->send, "%s %s %s ", pc, pk, len_buf);
+    memcpy(client->send + n, buf, len);
+    client->send[resp_len] = '\0';
+    client->send_len = resp_len;
+    client->send_pos = 0;
+
+    //switch to read state
+    memset(&client->ccr_write, 0, sizeof(struct ccrContextTag));
+    ev_io_stop(EV_A_ &client->io_read);
+    ev_io_start(EV_A_ &client->io_write);
+
+    return 0;
+}
+
+static int client_ccr_write(EV_P_ skipd_client* client) {
+    struct ccrContextTag* ctx = &client->ccr_write;
+
+    //stack
+    ccrBeginContext
+    int n;
+    ccrEndContext(ctx);
+
+    ccrBegin(ctx);
+    while(client->send_pos < client->send_len) {
+        CS->n = write(client->fd, client->send + client->send_pos, client->send_len - client->send_pos);
+        if(CS->n < 0) {
+            if(errno == EINTR || errno == EAGAIN) {
+                ccrReturn(ctx, 1);
+            } else {
+                fprintf(stderr, "write sock error, line=%d\n", __LINE__);
+                ccrStop(ctx, -1);
+            }
+        }
+
+        if((client->send_len -= CS->n) > 0) {
+            //write again
+            client->send_pos += CS->n;
+            ccrReturn(ctx, 2);
+        } else {
+            //Finished write
+            client->send_len = 0;
+            client->send_pos = 0;
+            ev_io_stop(EV_A_ &client->io_write);
+            ev_io_start(EV_A_ &client->io_read);
+        }
+    }
+    ccrFinish(ctx, 0);
+}
+
+static int client_ccr_read_util(skipd_client* client, char uc, int step_len) {
+    struct ccrContextTag* ctx = &client->ccr_read;
+
+    //stack
+    ccrBeginContext
+    int n;
+    int left;
+    ccrEndContext(ctx);
+
+    ccrBegin(ctx);
+    if(NULL == client->origin) {
+        client->origin = (char*)malloc(BUF_MAX);
+        client->origin_len = BUF_MAX;
+        client->read_pos = 0;
+        client->read_len = 0;
+    }
+
+    for(;;) {
+        CS->left = _min(client->origin_len - client->read_len, step_len);
+        if(0 == CS->left) {
+            ccrReturn(ctx, -2);
+        }
+
+        CS->n = recv(client->fd, client->origin + client->read_len, CS->left, 0);
+        if (0 == CS->n) {
+            ccrReturn(ctx, -1);
+        } else if(CS->n < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                ccrReturn(ctx, 0);
+            } else {
+                ccrReturn(ctx, -1);
+            }
+        }
+        client->read_len += CS->n;
+
+        for(; client->read_pos < client->read_len; client->read_pos++) {
+            if(client->origin[client->read_pos] == uc) {
+                ccrReturn(ctx, 1);
+            }
+        }
+    }
+    ccrFinish(ctx, 0);
+}
+
+static int client_run_command(EV_P_ skipd_client* client) {
+    int rt;
+    char *p;
+    struct ccrContextTag* ctx = &client->ccr_runcmd;
+
+    //ccrBeginContext
+    //ccrEndContext(ctx);
+
+    ccrBegin(ctx);
+    if(!strcmp(client->command, "set")) {
+        do {
+            rt = client_ccr_read_util(client, '\n', BUF_MAX);
+            if(-1 == rt) {
+                ccrReturn(ctx, -1);
+            } else if(rt < 0) {
+                p = "value no found";
+                client_send(EV_A_ client, p, strlen(p));
+                client->closing = 1;
+                ccrReturn(ctx, rt);
+            }
+        } while(!rt);
+
+        //client->server->db
+
+    } else if(!strcmp(client->command, "get")) {
+    } else if(!strcmp(client->command, "list")) {
+    } else if(!strcmp(client->command, "delay")) {
+    } else if(!strcmp(client->command, "time")) {
+    }
+
+    ccrFinish(ctx, 0);
+}
+
+static int client_ccr_process(EV_P_ skipd_client* client) {
+    int rt;
+    char* p;
+    struct ccrContextTag* ctx = &client->ccr_process;
+
+    //stack
+    ccrBeginContext
+    int n;
+    int left;
+    ccrEndContext(ctx);
+
+    ccrBegin(ctx);
+
+    for(;;) {
+        client->command[0] = '\0';
+        memset(&client->ccr_read, 0, sizeof(struct ccrContextTag));
+        do {
+            rt = client_ccr_read_util(client, ' ', COMMAND_LEN);
+            if(-1 == rt) {
+                ccrReturn(ctx, -1);
+            } else if(rt < 0) {
+                p = "command no found";
+                client_send(EV_A_ client, p, strlen(p));
+                client->closing = 1;
+                ccrReturn(ctx, rt);
+            }
+        } while(1 == rt);
+
+        strncpy(client->command, client->origin, client->read_pos);
+        if(client->read_len > client->read_len) {
+            memmove(client->origin, client->origin + client->read_pos + 1, client->read_len - client->read_pos - 1);
+        }
+        client->read_len -= 1;
+        client->read_pos = 0;
+
+        client->key[0] = '\0';
+        memset(&client->ccr_read, 0, sizeof(struct ccrContextTag));
+        do {
+            rt = client_ccr_read_util(client, ' ', KEY_LEN);
+            if(-1 == rt) {
+                ccrReturn(ctx, -1);
+            } else if(rt < 0) {
+                p = "key no found";
+                client_send(EV_A_ client, p, strlen(p));
+                client->closing = 1;
+                ccrReturn(ctx, rt);
+            }
+        } while(1 == rt);
+        strncpy(client->key, client->origin, client->read_pos);
+        if(client->read_len > client->read_len) {
+            memmove(client->origin, client->origin + client->read_pos + 1, client->read_len - client->read_pos - 1);
+        }
+        client->read_len -= 1;
+        client->read_pos = 0;
+
+        memset(&client->ccr_runcmd, 0, sizeof(struct ccrContextTag));
+        do {
+            rt = client_run_command(EV_A_ client);
+            if(-1 == rt || client->closing) {
+                ccrReturn(ctx, rt);
+            }
+        } while(!rt);
+    }
+    ccrFinish(ctx, 0);
+}
+
+static skipd_client* client_new(int fd) {
+    int opt = 1;
+    skipd_client* client = (skipd_client*)calloc(1, sizeof(skipd_client));
+    client->fd = fd;
+    client->send = NULL;
+    client->origin = NULL;
+
+    setsockopt(client->fd, SOL_TCP, TCP_NODELAY, &opt, sizeof(opt));
+    setnonblock(client->fd);
+    ev_io_init(&client->io_read, client_read, client->fd, EV_READ);
+    ev_io_init(&client->io_write, client_write, client->fd, EV_WRITE);
+
+    return client;
+}
+
+// This callback is called when data is readable on the unix socket.
+static void server_cb(EV_P_ ev_io *w, int revents) {
+    puts("unix stream socket has become readable");
+
+    int client_fd;
+    skipd_client* client;
+
+    skipd_server* server = container_of(w, skipd_server, io);
+
+    while (1) {
+        client_fd = accept(server->fd, NULL, NULL);
+        if( client_fd == -1 ) {
+            if( errno != EAGAIN && errno != EWOULDBLOCK ) {
+                fprintf(stderr, "accept() failed errno=%i (%s)",  errno, strerror(errno));
+                exit(EXIT_FAILURE);
+            }
+            break;
+        }
+
+        puts("accepted a client");
+        client = client_new(client_fd);
+        client->server = server;
+        ev_io_start(EV_A_ &client->io_read);
+    }
+}
+
+// Simply adds O_NONBLOCK to the file descriptor of choice
+int setnonblock(int fd)
+{
+    int flags;
+
+    flags = fcntl(fd, F_GETFL);
+    flags |= O_NONBLOCK;
+    return fcntl(fd, F_SETFL, flags);
+}
+
+int unix_socket_init(struct sockaddr_un* socket_un, char* sock_path, int max_queue) {
+    int fd;
+    int opt = 1;
+
+    unlink(sock_path);
+
+    // Setup a unix socket listener.
+    fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (-1 == fd) {
+        perror("echo server socket");
+        exit(EXIT_FAILURE);
+    }
+
+    setsockopt(fd, SOL_TCP, TCP_NODELAY, &opt, sizeof(opt));
+
+    // Set it non-blocking
+    if (-1 == setnonblock(fd)) {
+        perror("echo server socket nonblock");
+        exit(EXIT_FAILURE);
+    }
+
+    // Set it as unix socket
+    socket_un->sun_family = AF_UNIX;
+    strcpy(socket_un->sun_path, sock_path);
+
+    return fd;
+}
+
+int server_init(skipd_server* server, int max_queue) {
+    server->db = SkipDB_new();
+    SkipDB_setPath_(server->db, server->db_path);
+    SkipDB_open(server->db);
+
+    server->fd = unix_socket_init(&server->socket, server->sock_path, max_queue);
+    server->socket_len = sizeof(server->socket.sun_family) + strlen(server->socket.sun_path);
+
+    if (-1 == bind(server->fd, (struct sockaddr*) &server->socket, server->socket_len)) {
+        perror("echo server bind");
+        exit(EXIT_FAILURE);
+    }
+
+    if (-1 == listen(server->fd, max_queue)) {
+        perror("listen");
+        exit(EXIT_FAILURE);
+    }
+    return 0;
+}
+
+static struct option options[] = {
+    { "help",	no_argument,		NULL, 'h' },
+    { "db_path", required_argument,	NULL, 'd' },
+    { "sock_path", required_argument,	NULL, 's' },
+    { "daemon", 	required_argument,	NULL, 'D' },
+    { NULL, 0, 0, 0 }
+};
+
 int main(int argc, char **argv)
 {
     int n = 0, daemon = 0, max_queue = 128;
-    skipd_server server = {0};
+    skipd_server *server = &global_server;
     struct ev_periodic every_few_seconds;
     EV_P  = ev_default_loop(0);
 
-    strcpy(server.sock_path, "/tmp/.skipd_server_sock");
+    strcpy(server->sock_path, "/tmp/.skipd_server_sock");
     while (n >= 0) {
             n = getopt_long(argc, argv, "hd:D:s:", options, NULL);
             if (n < 0)
@@ -565,14 +683,14 @@ int main(int argc, char **argv)
             switch (n) {
             case 'D':
                 //TODO fix me if optarg is bigger than PATH_MAX
-                strcpy(server.pid_path, optarg);
+                strcpy(server->pid_path, optarg);
                 daemon = 1;
                 break;
             case 'd':
-                strcpy(server.db_path, optarg);
+                strcpy(server->db_path, optarg);
                 break;
-            case 's'
-                strcpy(server.sock_path, optarg);
+            case 's':
+                strcpy(server->sock_path, optarg);
                 break;
             case 'h':
                 fprintf(stderr, "Usage: webshell -c config_path [-d <log bitfield>] [-f <pid file>]\n");
@@ -581,28 +699,28 @@ int main(int argc, char **argv)
             }
     }
 
-    if(daemon && skipd_daemonize(server.pid_path)) {
+    if(daemon && skipd_daemonize(server->pid_path)) {
         fprintf(stderr, "Failed to daemonize\n");
         return 1;
     }
 
     // Create unix socket in non-blocking fashion
-    server_init(&server, max_queue);
+    server_init(server, max_queue);
 
     // To be sure that we aren't actually blocking
     ev_periodic_init(&every_few_seconds, not_blocked, 0, 5, 0);
     ev_periodic_start(EV_A_ &every_few_seconds);
 
     // Get notified whenever the socket is ready to read
-    ev_io_init(&server.io, server_cb, server.fd, EV_READ);
-    ev_io_start(EV_A_ &server.io);
+    ev_io_init(&server->io, server_cb, server->fd, EV_READ);
+    ev_io_start(EV_A_ &server->io);
 
     // Run our loop, ostensibly forever
     puts("unix-socket-echo starting...\n");
     ev_loop(EV_A_ 0);
 
     // This point is only ever reached if the loop is manually exited
-    close(server.fd);
+    close(server->fd);
     return EXIT_SUCCESS;
 }
 
