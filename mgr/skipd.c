@@ -336,7 +336,7 @@ static void client_write(EV_P_ ev_io *w, int revents) {
 
 #define UNKNOWN_LEN 8
 static int client_send(EV_P_ skipd_client* client, char* buf, int len) {
-    static char* unknown = "unknown";
+    static char* unknown = "unknown\n";
     char len_buf[10], *pc, *pk;
     int n, clen = strlen(client->command);
     int klen = strlen(client->key);
@@ -505,7 +505,7 @@ static int client_run_command(EV_P_ skipd_client* client) {
         dkey = Datum_FromCString_(client->key);
         dvalue = Datum_FromData_length_((unsigned char*)client->origin, client->read_pos);
         SkipDB_at_put_(client->server->db, dkey, dvalue);
-        p = "ok";
+        p = "ok\n";
         client_send(EV_A_ client, p, strlen(p));
 
         fprintf(stderr, "resp: %s\n", client->send);
@@ -591,13 +591,13 @@ static int client_ccr_process(EV_P_ skipd_client* client) {
 }
 
 static skipd_client* client_new(int fd) {
-    int opt = 1;
+    int opt = 0;
     skipd_client* client = (skipd_client*)calloc(1, sizeof(skipd_client));
     client->fd = fd;
     client->send = NULL;
     client->origin = NULL;
 
-    setsockopt(client->fd, SOL_TCP, TCP_NODELAY, &opt, sizeof(opt));
+    //setsockopt(client->fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
     setnonblock(client->fd);
     ev_io_init(&client->io_read, client_read, client->fd, EV_READ);
     ev_io_init(&client->io_write, client_write, client->fd, EV_WRITE);
@@ -643,7 +643,7 @@ int setnonblock(int fd)
 
 int unix_socket_init(struct sockaddr_un* socket_un, char* sock_path, int max_queue) {
     int fd;
-    int opt = 1;
+    int opt = 0;
 
     unlink(sock_path);
 
@@ -654,7 +654,8 @@ int unix_socket_init(struct sockaddr_un* socket_un, char* sock_path, int max_que
         exit(EXIT_FAILURE);
     }
 
-    setsockopt(fd, SOL_TCP, TCP_NODELAY, &opt, sizeof(opt));
+    //SOL_TCP
+    //setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
 
     // Set it non-blocking
     if (-1 == setnonblock(fd)) {
@@ -699,7 +700,7 @@ static struct option options[] = {
 
 int main(int argc, char **argv)
 {
-    int n = 0, daemon = 0, max_queue = 128;
+    int n = 0, daemon = 0, max_queue = -1;
     skipd_server *server = &global_server;
     struct ev_periodic every_few_seconds;
     EV_P  = ev_default_loop(0);

@@ -7,10 +7,6 @@
 #include <string.h>
 #include <sys/fcntl.h> // fcntl
 #include <unistd.h> // close
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
 
 // TODO
 // disconnect and reconnect on each newline
@@ -73,8 +69,6 @@ static void stdin_cb (EV_P_ ev_io *w, int revents)
 
   puts ("stdin written to, reading...");
   len2 = getline(&line, &len, stdin);
-  len = len2;
-  //fprintf(stderr, "line=%s len2=%d len=%d\n", line, len2, len);
   ev_io_stop(EV_A_ &send_w);
   ev_io_set (&send_w, remote_fd, EV_READ | EV_WRITE);
   ev_io_start(EV_A_ &send_w);
@@ -101,15 +95,13 @@ int setnonblock(int fd)
 }
 
 static void connection_new(EV_P_ char* sock_path) {
-  int len, opt = 0;
+  int len;
   struct sockaddr_un remote;
 
   if (-1 == (remote_fd = socket(AF_UNIX, SOCK_STREAM, 0))) {
       perror("socket");
       exit(1);
   }
-
-  //setsockopt(remote_fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
 
   // Set it non-blocking
   if (-1 == setnonblock(remote_fd)) {
@@ -146,7 +138,7 @@ int main (void)
   setnonblock(0);
   ev_io_init(&stdin_watcher, stdin_cb, /*STDIN_FILENO*/ 0, EV_READ);
 
-  connection_new(EV_A_ "/tmp/.skipd_server_sock");
+  connection_new(EV_A_ "/tmp/libev-echo.sock");
 
   // now wait for events to arrive
   ev_loop(EV_A_ 0);
