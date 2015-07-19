@@ -269,6 +269,8 @@ int skipd_daemonize(char *_lock_path)
 }
 
 static void client_release(EV_P_ skipd_client* client) {
+    fprintf(stderr, "closing client\n");
+
     ev_io_stop(EV_A_ &client->io_read);
     ev_io_stop(EV_A_ &client->io_write);
     close(client->fd);
@@ -293,6 +295,7 @@ static void client_read(EV_P_ ev_io *w, int revents) {
     assert(client->closing == 0);
 
     rt = client_ccr_process(EV_A_ client);
+    fprintf(stderr, "process:%d\n", rt);
     if(-1 == rt) {
         //Close it directly
         client_release(EV_A_ client);
@@ -315,6 +318,8 @@ static void client_read(EV_P_ ev_io *w, int revents) {
 static void client_write(EV_P_ ev_io *w, int revents) {
     skipd_client* client = container_of(w, skipd_client, io_write);
     int rt;
+
+    fprintf(stderr, "begin for writing\n");
 
     rt = client_ccr_write(EV_A_ client);
     if(rt < 0) {
@@ -413,9 +418,18 @@ static int client_ccr_write(EV_P_ skipd_client* client) {
             client->send_pos = 0;
             ev_io_stop(EV_A_ &client->io_write);
             ev_io_start(EV_A_ &client->io_read);
+            ccrReturn(ctx, 0);
         }
     }
     ccrFinish(ctx, 0);
+}
+
+static void client_read_fix(skipd_client* client) {
+    if(client->read_len > client->read_pos) {
+        memmove(client->origin, client->origin + client->read_pos + 1, client->read_len - client->read_pos - 1);
+    }
+    client->read_len -= client->read_pos + 1;
+    client->read_pos = 0;
 }
 
 static int client_ccr_read_util(skipd_client* client, char uc, int step_len) {
@@ -436,6 +450,14 @@ static int client_ccr_read_util(skipd_client* client, char uc, int step_len) {
     }
 
     for(;;) {
+
+        //Read from old stream
+        for(; client->read_pos < client->read_len; client->read_pos++) {
+            if(client->origin[client->read_pos] == uc) {
+                ccrReturn(ctx, 1);
+            }
+        }
+
         CS->left = _min(client->origin_len - client->read_len, step_len);
         if(0 == CS->left) {
             ccrReturn(ctx, -2);
@@ -452,12 +474,6 @@ static int client_ccr_read_util(skipd_client* client, char uc, int step_len) {
             }
         }
         client->read_len += CS->n;
-
-        for(; client->read_pos < client->read_len; client->read_pos++) {
-            if(client->origin[client->read_pos] == uc) {
-                ccrReturn(ctx, 1);
-            }
-        }
     }
     ccrFinish(ctx, 0);
 }
@@ -465,6 +481,7 @@ static int client_ccr_read_util(skipd_client* client, char uc, int step_len) {
 static int client_run_command(EV_P_ skipd_client* client) {
     int rt;
     char *p;
+    Datum dkey, dvalue;
     struct ccrContextTag* ctx = &client->ccr_runcmd;
 
     //ccrBeginContext
@@ -483,9 +500,20 @@ static int client_run_command(EV_P_ skipd_client* client) {
                 ccrReturn(ctx, rt);
             }
         } while(!rt);
+        client_read_fix(client);
 
-        //client->server->db
+        dkey = Datum_FromCString_(client->key);
+        dvalue = Datum_FromData_length_((unsigned char*)client->origin, client->read_pos);
+        SkipDB_at_put_(client->server->db, dkey, dvalue);
+        p = "ok";
+        client_send(EV_A_ client, p, strlen(p));
 
+        fprintf(stderr, "resp: %s\n", client->send);
+
+        // Finished
+        ccrReturn(ctx, 0);
+
+    } else if(!strcmp(client->command, "replace")) {
     } else if(!strcmp(client->command, "get")) {
     } else if(!strcmp(client->command, "list")) {
     } else if(!strcmp(client->command, "delay")) {
@@ -521,14 +549,11 @@ static int client_ccr_process(EV_P_ skipd_client* client) {
                 client->closing = 1;
                 ccrReturn(ctx, rt);
             }
-        } while(1 == rt);
+        } while(!rt);
 
         strncpy(client->command, client->origin, client->read_pos);
-        if(client->read_len > client->read_len) {
-            memmove(client->origin, client->origin + client->read_pos + 1, client->read_len - client->read_pos - 1);
-        }
-        client->read_len -= 1;
-        client->read_pos = 0;
+        client->command[client->read_pos] = '\0';
+        client_read_fix(client);
 
         client->key[0] = '\0';
         memset(&client->ccr_read, 0, sizeof(struct ccrContextTag));
@@ -542,21 +567,25 @@ static int client_ccr_process(EV_P_ skipd_client* client) {
                 client->closing = 1;
                 ccrReturn(ctx, rt);
             }
-        } while(1 == rt);
+        } while(!rt);
         strncpy(client->key, client->origin, client->read_pos);
-        if(client->read_len > client->read_len) {
-            memmove(client->origin, client->origin + client->read_pos + 1, client->read_len - client->read_pos - 1);
-        }
-        client->read_len -= 1;
-        client->read_pos = 0;
+        client->key[client->read_pos] = '\0';
+        client_read_fix(client);
 
         memset(&client->ccr_runcmd, 0, sizeof(struct ccrContextTag));
-        do {
+        for(;;) {
             rt = client_run_command(EV_A_ client);
             if(-1 == rt || client->closing) {
                 ccrReturn(ctx, rt);
             }
-        } while(!rt);
+            //OK hear
+            if(0 == rt) {
+                fprintf(stderr, "break from command\n");
+                //Return back for send message
+                ccrReturn(ctx, 0);
+                break;
+            }
+        }
     }
     ccrFinish(ctx, 0);
 }
@@ -693,7 +722,7 @@ int main(int argc, char **argv)
                 strcpy(server->sock_path, optarg);
                 break;
             case 'h':
-                fprintf(stderr, "Usage: webshell -c config_path [-d <log bitfield>] [-f <pid file>]\n");
+                fprintf(stderr, "Usage: skipd xxx todo\n");
                 exit(1);
                 break;
             }
@@ -725,5 +754,5 @@ int main(int argc, char **argv)
 }
 
 static void not_blocked(EV_P_ ev_periodic *w, int revents) {
-  puts("I'm not blocked");
+    puts("I'm not blocked");
 }
