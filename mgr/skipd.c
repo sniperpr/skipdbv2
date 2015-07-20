@@ -54,7 +54,8 @@ typedef struct _skipd_server {
 }; */
 
 enum ccr_break_state {
-    ccr_break_curr = 0,
+    ccr_break_continue = 0,
+    ccr_break_curr,
     ccr_break_all,
     ccr_break_killed
 };
@@ -296,11 +297,13 @@ static int client_ccr_read_util(skipd_client* client, char uc, int step_len) {
 
         CS->n = recv(client->fd, client->origin + client->read_len, CS->left, 0);
         if (0 == CS->n) {
+            client->break_level = ccr_break_killed;
             ccrReturn(ctx, -1);
         } else if(CS->n < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 ccrReturn(ctx, 0);
             } else {
+                client->break_level = ccr_break_killed;
                 ccrReturn(ctx, -1);
             }
         }
@@ -310,27 +313,34 @@ static int client_ccr_read_util(skipd_client* client, char uc, int step_len) {
 }
 
 static int client_run_command(EV_P_ skipd_client* client) {
-    int rt;
     char *p;
     Datum dkey, dvalue;
     struct ccrContextTag* ctx = &client->ccr_runcmd;
 
-    //ccrBeginContext
-    //ccrEndContext(ctx);
+    ccrBeginContext
+    int rt;
+    ccrEndContext(ctx);
 
     ccrBegin(ctx);
     if(!strcmp(client->command, "set")) {
         do {
-            rt = client_ccr_read_util(client, '\n', BUF_MAX);
-            if(-1 == rt) {
+            CS->rt = client_ccr_read_util(client, '\n', BUF_MAX);
+            if(-1 == CS->rt) {
                 ccrReturn(ctx, -1);
-            } else if(rt < 0) {
+            } else if(CS->rt < 0) {
                 p = "value no found";
                 client_send(EV_A_ client, p, strlen(p));
                 client->break_level = ccr_break_killed;
-                ccrReturn(ctx, rt);
+                ccrReturn(ctx, CS->rt);
             }
-        } while(!rt);
+
+            if((ccr_break_killed == client->break_level)
+                    || (ccr_break_all == client->break_level)) {
+                ccrReturn(ctx, -1);
+            } else if(ccr_break_curr == client->break_level) {
+                client->break_level = ccr_break_continue;
+            }
+        } while(!CS->rt);
         client_read_fix(client);
 
         dkey = Datum_FromCString_(client->key);
@@ -355,12 +365,12 @@ static int client_run_command(EV_P_ skipd_client* client) {
 }
 
 static int client_ccr_process(EV_P_ skipd_client* client) {
-    int rt;
     char* p;
     struct ccrContextTag* ctx = &client->ccr_process;
 
     //stack
     ccrBeginContext
+    int rt;
     int n;
     int left;
     ccrEndContext(ctx);
@@ -371,16 +381,16 @@ static int client_ccr_process(EV_P_ skipd_client* client) {
         client->command[0] = '\0';
         memset(&client->ccr_read, 0, sizeof(struct ccrContextTag));
         do {
-            rt = client_ccr_read_util(client, ' ', COMMAND_LEN);
-            if(-1 == rt) {
+            CS->rt = client_ccr_read_util(client, ' ', COMMAND_LEN);
+            if(-1 == CS->rt) {
                 ccrReturn(ctx, -1);
-            } else if(rt < 0) {
+            } else if(CS->rt < 0) {
                 p = "command no found";
                 client_send(EV_A_ client, p, strlen(p));
                 client->break_level = ccr_break_killed;
-                ccrReturn(ctx, rt);
+                ccrReturn(ctx, CS->rt);
             }
-        } while(!rt);
+        } while(!CS->rt);
 
         strncpy(client->command, client->origin, client->read_pos);
         client->command[client->read_pos] = '\0';
@@ -389,28 +399,28 @@ static int client_ccr_process(EV_P_ skipd_client* client) {
         client->key[0] = '\0';
         memset(&client->ccr_read, 0, sizeof(struct ccrContextTag));
         do {
-            rt = client_ccr_read_util(client, ' ', KEY_LEN);
-            if(-1 == rt) {
+            CS->rt = client_ccr_read_util(client, ' ', KEY_LEN);
+            if(-1 == CS->rt) {
                 ccrReturn(ctx, -1);
-            } else if(rt < 0) {
+            } else if(CS->rt < 0) {
                 p = "key no found";
                 client_send(EV_A_ client, p, strlen(p));
                 client->break_level = ccr_break_killed;
-                ccrReturn(ctx, rt);
+                ccrReturn(ctx, CS->rt);
             }
-        } while(!rt);
+        } while(!CS->rt);
         strncpy(client->key, client->origin, client->read_pos);
         client->key[client->read_pos] = '\0';
         client_read_fix(client);
 
         memset(&client->ccr_runcmd, 0, sizeof(struct ccrContextTag));
         for(;;) {
-            rt = client_run_command(EV_A_ client);
-            if((-1 == rt) || (ccr_break_killed == client->break_level)) {
-                ccrReturn(ctx, rt);
+            CS->rt = client_run_command(EV_A_ client);
+            if((-1 == CS->rt) || (ccr_break_killed == client->break_level)) {
+                ccrReturn(ctx, CS->rt);
             }
             //OK hear
-            if(0 == rt) {
+            if(0 == CS->rt) {
                 fprintf(stderr, "break from command\n");
                 //Return back for send message
                 ccrReturn(ctx, 0);
@@ -463,8 +473,7 @@ static void server_cb(EV_P_ ev_io *w, int revents) {
 }
 
 // Simply adds O_NONBLOCK to the file descriptor of choice
-int setnonblock(int fd)
-{
+int setnonblock(int fd) {
     int flags;
 
     flags = fcntl(fd, F_GETFL);
