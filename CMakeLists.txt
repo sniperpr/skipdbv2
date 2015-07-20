@@ -38,7 +38,7 @@ TARGET_LINK_LIBRARIES(example m skipdb ${LIBEV_LIBRARIES})
 
 ADD_EXECUTABLE(skiplist ./tests/skiplist)
 
-ADD_EXECUTABLE(skipd ${PROJECT_SOURCE_DIR}/mgr/skipd.c)
+ADD_EXECUTABLE(skipd ${PROJECT_SOURCE_DIR}/mgr/skipd.c ${PROJECT_SOURCE_DIR}/mgr/daemonize.c)
 TARGET_LINK_LIBRARIES(skipd m skipdb ${LIBEV_LIBRARIES})
 
 ADD_EXECUTABLE(server ${PROJECT_SOURCE_DIR}/mgr/array-heap.c ${PROJECT_SOURCE_DIR}/mgr/unix-echo-server.c)
