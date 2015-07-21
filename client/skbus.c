@@ -40,6 +40,7 @@ static void send_cb (EV_P_ ev_io *w, int revents)
 
     p = malloc(HEADER_PREFIX + len + 1);
     sprintf(p, "%s%07d %s", MAGIC, len, line);
+    puts(p);
     if (-1 == send(remote_fd, p, len + HEADER_PREFIX, 0)) {
       perror("echo send");
       exit(EXIT_FAILURE);

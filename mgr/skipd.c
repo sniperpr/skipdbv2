@@ -206,19 +206,19 @@ static void client_write(EV_P_ ev_io *w, int revents) {
     } else if(0 == rt) {
         if(ccr_break_killed == client->break_level) {
             client_release(EV_A_ client);
-        } else {
-            //reset it
+        } 
+    } else {
+            // rt > 0, So reset it
             memset(&client->ccr_write, 0, sizeof(struct ccrContextTag));
             client->break_level = 0;
-        }
     }
 
     //TODO void event_active (struct event *ev, int res, short ncalls)
 }
 
-#define UNKNOWN_LEN 8
+#define UNKNOWN_LEN 7
 static int client_send(EV_P_ skipd_client* client, char* buf, int len) {
-    static char* unknown = "unknown\n";
+    static char* unknown = "unknown";
     char pref_buf[HEADER_PREFIX], *pc, *pk;
     int n, clen = (NULL == client->command ? 0 : strlen(client->command));
     int klen = (NULL == client->key ? 0 : strlen(client->key));
@@ -284,27 +284,27 @@ static int client_ccr_write(EV_P_ skipd_client* client) {
         CS->n = write(client->fd, client->send + client->send_pos, client->send_len - client->send_pos);
         if(CS->n < 0) {
             if(errno == EINTR || errno == EAGAIN) {
-                ccrReturn(ctx, 1);
+                ccrReturn(ctx, ccr_error_ok);
             } else {
                 fprintf(stderr, "write sock error, line=%d\n", __LINE__);
-                ccrStop(ctx, -1);
+                ccrStop(ctx, ccr_error_err1);
             }
         }
 
         if((client->send_len -= CS->n) > 0) {
             //write again
             client->send_pos += CS->n;
-            ccrReturn(ctx, 2);
+            ccrReturn(ctx, ccr_error_ok);
         } else {
             //Finished write
             client->send_len = 0;
             client->send_pos = 0;
             ev_io_stop(EV_A_ &client->io_write);
             ev_io_start(EV_A_ &client->io_read);
-            ccrReturn(ctx, 0);
+            ccrReturn(ctx, ccr_error_ok1);
         }
     }
-    ccrFinish(ctx, 0);
+    ccrFinish(ctx, ccr_error_ok1);
 }
 
 /* static void client_read_fix(skipd_client* client) {
@@ -339,9 +339,9 @@ static int client_ccr_read_util(skipd_client* client, int step_len) {
         client->origin = (char*)malloc(buf_len + 1);
         client->origin_len = buf_len;
         client->origin[client->origin_len] = '\0';
-        client->read_pos = 0;
-        client->read_len = 0;
     }
+    client->read_pos = 0;
+    client->read_len = 0;
 
     for(;;) {
         CS->left = step_len - client->read_len;
@@ -358,10 +358,11 @@ static int client_ccr_read_util(skipd_client* client, int step_len) {
             } else {
                 ccrReturn(ctx, ccr_error_err1);
             }
-        }
-        client->read_len += CS->n;
-        if(client->read_len == step_len) {
-            break;
+        } else {
+            client->read_len += CS->n;
+            if(client->read_len == step_len) {
+                break;
+            }
         }
     }
     ccrFinish(ctx, ccr_error_ok1);
@@ -396,6 +397,7 @@ static int client_run_command(EV_P_ skipd_client* client) {
         p1 = "ok\n";
         client_send(EV_A_ client, p1, strlen(p1));
         fprintf(stderr, "resp: %s\n", client->send);
+        return ccr_error_ok1;
     } else if(!strcmp(client->command, "replace")) {
     } else if(!strcmp(client->command, "get")) {
     } else if(!strcmp(client->command, "list")) {
@@ -403,7 +405,7 @@ static int client_run_command(EV_P_ skipd_client* client) {
     } else if(!strcmp(client->command, "time")) {
     }
 
-    return ccr_error_ok1;
+    return ccr_error_err2;
 }
 
 static int client_ccr_process(EV_P_ skipd_client* client) {
@@ -470,10 +472,6 @@ static int client_ccr_process(EV_P_ skipd_client* client) {
             ccrStop(ctx, ccr_error_err2);
         }
 
-        /* Reset the read_len */
-        client->read_len = 0;
-        client->read_pos = 0;
-
         /* Sub routine */
         memset(&client->ccr_read, 0, sizeof(struct ccrContextTag));
         for(;;) {
@@ -492,15 +490,16 @@ static int client_ccr_process(EV_P_ skipd_client* client) {
         }
 
         assert(CS->rt > 0);
+        client->origin[client->data_len] = '\0';
         CS->rt = client_run_command(EV_A_ client);
         if(CS->rt < 0) {
+            p = "run command error\n";
+            client_send(EV_A_ client, p, strlen(p));
             client->break_level = ccr_break_killed;
             ccrReturn(ctx, CS->rt);
         }
 
         /* Reset the read_len */
-        client->read_len = 0;
-        client->read_pos = 0;
         client->command = NULL;
         client->key = NULL;
         if(client->origin_len > BUF_MAX) {
