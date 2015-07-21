@@ -16,6 +16,7 @@ int main(void)
 	
 	// write
 	
+#if 0
 	SkipDB_beginTransaction(db);
 	key = Datum_FromCString_("testKey");
 	value = Datum_FromCString_("testValue");
@@ -26,6 +27,7 @@ int main(void)
 	SkipDB_at_put_(db, key2, value2);
 
 	SkipDB_commitTransaction(db);
+#endif
         SkipDB_show(db);
 	
 	// read

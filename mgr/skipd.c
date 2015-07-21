@@ -116,6 +116,13 @@ static int client_ccr_write(EV_P_ skipd_client* client);
 
 char* global_magic = MAGIC;
 skipd_server global_server;
+ev_signal signal_watcher;
+
+static void sigint_cb (EV_P_ ev_signal *w, int revents) {
+    fprintf(stderr, "exit..\n");
+    SkipDB_close(&global_server.db);
+    ev_break(EV_A_ EVBREAK_ALL);
+}
 
 typedef enum {
     S2ISUCCESS = 0,
@@ -392,14 +399,34 @@ static int client_run_command(EV_P_ skipd_client* client) {
 
         dkey = Datum_FromCString_(client->key);
         dvalue = Datum_FromData_length_((unsigned char*)p1, client->data_len - (p1 - client->origin));
+	SkipDB_beginTransaction(client->server->db);
         SkipDB_at_put_(client->server->db, dkey, dvalue);
+	SkipDB_commitTransaction(client->server->db);
 
         p1 = "ok\n";
         client_send(EV_A_ client, p1, strlen(p1));
         fprintf(stderr, "resp: %s\n", client->send);
         return ccr_error_ok1;
-    } else if(!strcmp(client->command, "replace")) {
     } else if(!strcmp(client->command, "get")) {
+        p1 = p2+1;
+        p2 = strstr(p1, "\n");
+        if(NULL == p2) {
+            return ccr_error_err2;
+        }
+        *p2 = '\0';
+        client->key = p1;
+        p1 = p2+1;
+
+        dkey = Datum_FromCString_(client->key);
+	dvalue = SkipDB_at_(client->server->db, dkey);
+        if(NULL == dvalue.data) {
+            p1 = "none\n";
+            client_send(EV_A_ client, p1, strlen(p1));
+        } else {
+            client_send(EV_A_ client, dvalue.data, dvalue.size);
+        }
+        return ccr_error_ok1;
+    } else if(!strcmp(client->command, "replace")) {
     } else if(!strcmp(client->command, "list")) {
     } else if(!strcmp(client->command, "delay")) {
     } else if(!strcmp(client->command, "time")) {
@@ -591,9 +618,14 @@ int unix_socket_init(struct sockaddr_un* socket_un, char* sock_path, int max_que
 }
 
 int server_init(skipd_server* server, int max_queue) {
+    int count;
+
     server->db = SkipDB_new();
     SkipDB_setPath_(server->db, server->db_path);
     SkipDB_open(server->db);
+
+    count = SkipDB_count(server->db);
+    fprintf(stderr, "count=%d\n", count);
 
     server->fd = unix_socket_init(&server->socket, server->sock_path, max_queue);
     server->socket_len = sizeof(server->socket.sun_family) + strlen(server->socket.sun_path);
@@ -653,6 +685,9 @@ int main(int argc, char **argv)
         fprintf(stderr, "Failed to daemonize\n");
         return 1;
     }
+
+    ev_signal_init (&signal_watcher, sigint_cb, SIGINT);
+    ev_signal_start (EV_A_ &signal_watcher);
 
     // Create unix socket in non-blocking fashion
     server_init(server, max_queue);
