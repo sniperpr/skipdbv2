@@ -12,6 +12,11 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 
+#define MAGIC "magicv1 "
+#define MAGIC_LEN 8
+#define HEADER_LEN 8
+#define HEADER_PREFIX (MAGIC_LEN + HEADER_LEN)
+
 // TODO
 // disconnect and reconnect on each newline
 
@@ -27,16 +32,22 @@ size_t len = 0;
 
 static void send_cb (EV_P_ ev_io *w, int revents)
 {
+  char *p;
+
   if (revents & EV_WRITE)
   {
     puts ("remote ready for writing...");
 
-    if (-1 == send(remote_fd, line, len, 0)) {
+    p = malloc(HEADER_PREFIX + len + 1);
+    sprintf(p, "%s%07d %s", MAGIC, len, line);
+    if (-1 == send(remote_fd, p, len + HEADER_PREFIX, 0)) {
       perror("echo send");
       exit(EXIT_FAILURE);
     }
+    free(p);
+
     // once the data is sent, stop notifications that
-    // data can be sent until there is actually more 
+    // data can be sent until there is actually more
     // data to send
     ev_io_stop(EV_A_ &send_w);
     ev_io_set(&send_w, remote_fd, EV_READ);

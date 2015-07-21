@@ -1,9 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <getopt.h>
+#include <limits.h> // [LONG|INT][MIN|MAX]
+#include <errno.h>  // errno
 #include <string.h>
 #include <signal.h>
 #include <assert.h>
@@ -23,15 +24,23 @@
         const typeof( ((type *)0)->member ) *__mptr = (const typeof( ((type *)0)->member )*)(ptr);    \
         (type *)( (char *)__mptr - offsetof2(type,member) );})
 
+#define MAGIC "magicv1 "
+#define MAGIC_LEN 8
+#define HEADER_LEN 8
+#define HEADER_PREFIX (MAGIC_LEN + HEADER_LEN)
 #define PATH_MAX 128
-#define COMMAND_LEN 32
-#define KEY_LEN 128
 #define BUF_MAX 2048
+#define READ_MAX 65536
 
 #define _min(a,b) \
    ({ __typeof__ (a) _a = (a); \
        __typeof__ (b) _b = (b); \
      _a > _b ? _b : _a; })
+
+#define _max(a,b) \
+   ({ __typeof__ (a) _a = (a); \
+       __typeof__ (b) _b = (b); \
+     _a > _b ? _a : _b; })
 
 typedef struct _skipd_server {
     ev_io io;
@@ -60,6 +69,15 @@ enum ccr_break_state {
     ccr_break_killed
 };
 
+enum ccr_error_code {
+    ccr_error_err1 = -1,
+    ccr_error_err2 = -2,
+    ccr_error_err3 = -3,
+    ccr_error_ok = 0,
+    ccr_error_ok1 = 1,
+    ccr_error_ok2 = 2
+};
+
 typedef struct _skipd_client {
     ev_io io_read;
     ev_io io_write;
@@ -67,13 +85,13 @@ typedef struct _skipd_client {
     struct ccrContextTag ccr_read;
     struct ccrContextTag ccr_write;
     struct ccrContextTag ccr_process;
-    struct ccrContextTag ccr_runcmd;
+    //struct ccrContextTag ccr_runcmd;
     int break_level;
 
     int fd;
 
-    char command[COMMAND_LEN+1];
-    char key[KEY_LEN+1];
+    char* command;
+    char* key;
     int data_len;
 
     char* origin;
@@ -96,7 +114,34 @@ static void not_blocked(EV_P_ ev_periodic *w, int revents);
 static int client_ccr_process(EV_P_ skipd_client* client);
 static int client_ccr_write(EV_P_ skipd_client* client);
 
+char* global_magic = MAGIC;
 skipd_server global_server;
+
+typedef enum {
+    S2ISUCCESS = 0,
+    S2IOVERFLOW,
+    S2IUNDERFLOW,
+    S2IINCONVERTIBLE
+} STR2INT_ERROR;
+
+STR2INT_ERROR str2int(int *i, char *s, int base) {
+  char *end;
+  long  l;
+  errno = 0;
+  l = strtol(s, &end, base);
+
+  if ((errno == ERANGE && l == LONG_MAX) || l > INT_MAX) {
+    return S2IOVERFLOW;
+  }
+  if ((errno == ERANGE && l == LONG_MIN) || l < INT_MIN) {
+    return S2IUNDERFLOW;
+  }
+  if (*s == '\0' || *end != '\0') {
+    return S2IINCONVERTIBLE;
+  }
+  *i = l;
+  return S2ISUCCESS;
+}
 
 static void client_release(EV_P_ skipd_client* client) {
     fprintf(stderr, "closing client\n");
@@ -126,9 +171,12 @@ static void client_read(EV_P_ ev_io *w, int revents) {
 
     rt = client_ccr_process(EV_A_ client);
     fprintf(stderr, "process:%d\n", rt);
-    if(-1 == rt) {
+    if(ccr_error_err1 == rt) {
         //Close it directly
         client_release(EV_A_ client);
+    } else if(ccr_error_ok == rt) {
+        //Just continue
+        client->break_level = 0;
     } else if(rt < 0) {
         if(ccr_break_killed == client->break_level) {
             //wait for waiting completely
@@ -139,9 +187,10 @@ static void client_read(EV_P_ ev_io *w, int revents) {
                 memset(&client->ccr_process, 0, sizeof(struct ccrContextTag));
             }
         }
-    } else {
-        //reset
+    } else if(rt > 0) {
+        //OK and than reset
         memset(&client->ccr_process, 0, sizeof(struct ccrContextTag));
+        client->break_level = 0;
     }
 }
 
@@ -160,6 +209,7 @@ static void client_write(EV_P_ ev_io *w, int revents) {
         } else {
             //reset it
             memset(&client->ccr_write, 0, sizeof(struct ccrContextTag));
+            client->break_level = 0;
         }
     }
 
@@ -169,11 +219,13 @@ static void client_write(EV_P_ ev_io *w, int revents) {
 #define UNKNOWN_LEN 8
 static int client_send(EV_P_ skipd_client* client, char* buf, int len) {
     static char* unknown = "unknown\n";
-    char len_buf[10], *pc, *pk;
-    int n, clen = strlen(client->command);
-    int klen = strlen(client->key);
+    char pref_buf[HEADER_PREFIX], *pc, *pk;
+    int n, clen = (NULL == client->command ? 0 : strlen(client->command));
+    int klen = (NULL == client->key ? 0 : strlen(client->key));
 
-    int resp_len = len;
+    memcpy(pref_buf, global_magic, MAGIC_LEN);
+
+    int resp_len = len + 2;
     if(0 == clen) {
         pc = unknown;
         resp_len += UNKNOWN_LEN;
@@ -188,13 +240,11 @@ static int client_send(EV_P_ skipd_client* client, char* buf, int len) {
         pk = client->key;
         resp_len += klen;
     }
-
-    len_buf[0] = '\0';
-    sprintf(len_buf, "%d", len);
-    resp_len += strlen(len_buf) + 3;
+    sprintf(pref_buf + MAGIC_LEN, "%07d ", resp_len);
+    resp_len += HEADER_PREFIX;
 
     if(NULL == client->send) {
-        client->send = (char*)malloc(BUF_MAX);
+        client->send = (char*)malloc(BUF_MAX+1);
         client->send_max = BUF_MAX;
         client->send_len = 0;
     }
@@ -206,8 +256,9 @@ static int client_send(EV_P_ skipd_client* client, char* buf, int len) {
         client->send_len = 0;
     }
 
-    n = sprintf(client->send, "%s %s %s ", pc, pk, len_buf);
-    memcpy(client->send + n, buf, len);
+    memcpy(client->send, pref_buf, HEADER_PREFIX);
+    n = sprintf(client->send + HEADER_PREFIX, "%s %s ", pc, pk);
+    memcpy(client->send + HEADER_PREFIX + n, buf, len);
     client->send[resp_len] = '\0';
     client->send_len = resp_len;
     client->send_pos = 0;
@@ -256,15 +307,16 @@ static int client_ccr_write(EV_P_ skipd_client* client) {
     ccrFinish(ctx, 0);
 }
 
-static void client_read_fix(skipd_client* client) {
+/* static void client_read_fix(skipd_client* client) {
     if(client->read_len > client->read_pos) {
         memmove(client->origin, client->origin + client->read_pos + 1, client->read_len - client->read_pos - 1);
     }
     client->read_len -= client->read_pos + 1;
     client->read_pos = 0;
-}
+} */
 
-static int client_ccr_read_util(skipd_client* client, char uc, int step_len) {
+static int client_ccr_read_util(skipd_client* client, int step_len) {
+    int buf_len;
     struct ccrContextTag* ctx = &client->ccr_read;
 
     //stack
@@ -274,86 +326,76 @@ static int client_ccr_read_util(skipd_client* client, char uc, int step_len) {
     ccrEndContext(ctx);
 
     ccrBegin(ctx);
-    if(NULL == client->origin) {
-        client->origin = (char*)malloc(BUF_MAX);
-        client->origin_len = BUF_MAX;
+
+    if(step_len > READ_MAX) {
+        ccrReturn(ctx, ccr_error_err2);
+    }
+
+    buf_len = _max(step_len, BUF_MAX);
+    if(buf_len > client->origin_len) {
+        if(NULL != client->origin) {
+            free(client->origin);
+        }
+        client->origin = (char*)malloc(buf_len + 1);
+        client->origin_len = buf_len;
+        client->origin[client->origin_len] = '\0';
         client->read_pos = 0;
         client->read_len = 0;
     }
 
     for(;;) {
-
-        //Read from old stream
-        for(; client->read_pos < client->read_len; client->read_pos++) {
-            if(client->origin[client->read_pos] == uc) {
-                ccrReturn(ctx, 1);
-            }
-        }
-
-        CS->left = _min(client->origin_len - client->read_len, step_len);
-        if(0 == CS->left) {
-            ccrReturn(ctx, -2);
-        }
+        CS->left = step_len - client->read_len;
+        assert(0 != CS->left);
 
         CS->n = recv(client->fd, client->origin + client->read_len, CS->left, 0);
         if (0 == CS->n) {
-            client->break_level = ccr_break_killed;
-            ccrReturn(ctx, -1);
+            //client closed
+            ccrReturn(ctx, ccr_error_err1);
         } else if(CS->n < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                ccrReturn(ctx, 0);
+                client->break_level = ccr_break_all;
+                ccrReturn(ctx, ccr_error_ok);
             } else {
-                client->break_level = ccr_break_killed;
-                ccrReturn(ctx, -1);
+                ccrReturn(ctx, ccr_error_err1);
             }
         }
         client->read_len += CS->n;
+        if(client->read_len == step_len) {
+            break;
+        }
     }
-    ccrFinish(ctx, 0);
+    ccrFinish(ctx, ccr_error_ok1);
 }
 
 static int client_run_command(EV_P_ skipd_client* client) {
-    char *p;
+    char *p1, *p2;
     Datum dkey, dvalue;
-    struct ccrContextTag* ctx = &client->ccr_runcmd;
 
-    ccrBeginContext
-    int rt;
-    ccrEndContext(ctx);
+    p1 = client->origin;
+    p2 = strstr(p1, " ");
+    if(NULL == p2) {
+        return ccr_error_err2;
+    }
+    *p2 = '\0';
+    client->command = p1;
 
-    ccrBegin(ctx);
     if(!strcmp(client->command, "set")) {
-        do {
-            CS->rt = client_ccr_read_util(client, '\n', BUF_MAX);
-            if(-1 == CS->rt) {
-                ccrReturn(ctx, -1);
-            } else if(CS->rt < 0) {
-                p = "value no found";
-                client_send(EV_A_ client, p, strlen(p));
-                client->break_level = ccr_break_killed;
-                ccrReturn(ctx, CS->rt);
-            }
-
-            if((ccr_break_killed == client->break_level)
-                    || (ccr_break_all == client->break_level)) {
-                ccrReturn(ctx, -1);
-            } else if(ccr_break_curr == client->break_level) {
-                client->break_level = ccr_break_continue;
-            }
-        } while(!CS->rt);
-        client_read_fix(client);
+        p1 = p2+1;
+        p2 = strstr(p1, " ");
+        if(NULL == p2) {
+            return ccr_error_err2;
+        }
+        *p2 = '\0';
+        client->key = p1;
+        p1 = p2+1;
 
         dkey = Datum_FromCString_(client->key);
-        dvalue = Datum_FromData_length_((unsigned char*)client->origin, client->read_pos);
+        dvalue = Datum_FromData_length_((unsigned char*)p1, client->data_len - (p1 - client->origin));
         SkipDB_at_put_(client->server->db, dkey, dvalue);
-        p = "ok\n";
-        client_send(EV_A_ client, p, strlen(p));
 
+        p1 = "ok\n";
+        client_send(EV_A_ client, p1, strlen(p1));
         fprintf(stderr, "resp: %s\n", client->send);
-
-        // Finished
-        ccrReturn(ctx, 0);
-
     } else if(!strcmp(client->command, "replace")) {
     } else if(!strcmp(client->command, "get")) {
     } else if(!strcmp(client->command, "list")) {
@@ -361,7 +403,7 @@ static int client_run_command(EV_P_ skipd_client* client) {
     } else if(!strcmp(client->command, "time")) {
     }
 
-    ccrFinish(ctx, 0);
+    return ccr_error_ok1;
 }
 
 static int client_ccr_process(EV_P_ skipd_client* client) {
@@ -378,57 +420,96 @@ static int client_ccr_process(EV_P_ skipd_client* client) {
     ccrBegin(ctx);
 
     for(;;) {
-        client->command[0] = '\0';
+
+        /* Sub routine */
         memset(&client->ccr_read, 0, sizeof(struct ccrContextTag));
-        do {
-            CS->rt = client_ccr_read_util(client, ' ', COMMAND_LEN);
-            if(-1 == CS->rt) {
-                ccrReturn(ctx, -1);
-            } else if(CS->rt < 0) {
-                p = "command no found";
-                client_send(EV_A_ client, p, strlen(p));
-                client->break_level = ccr_break_killed;
-                ccrReturn(ctx, CS->rt);
-            }
-        } while(!CS->rt);
-
-        strncpy(client->command, client->origin, client->read_pos);
-        client->command[client->read_pos] = '\0';
-        client_read_fix(client);
-
-        client->key[0] = '\0';
-        memset(&client->ccr_read, 0, sizeof(struct ccrContextTag));
-        do {
-            CS->rt = client_ccr_read_util(client, ' ', KEY_LEN);
-            if(-1 == CS->rt) {
-                ccrReturn(ctx, -1);
-            } else if(CS->rt < 0) {
-                p = "key no found";
-                client_send(EV_A_ client, p, strlen(p));
-                client->break_level = ccr_break_killed;
-                ccrReturn(ctx, CS->rt);
-            }
-        } while(!CS->rt);
-        strncpy(client->key, client->origin, client->read_pos);
-        client->key[client->read_pos] = '\0';
-        client_read_fix(client);
-
-        memset(&client->ccr_runcmd, 0, sizeof(struct ccrContextTag));
         for(;;) {
-            CS->rt = client_run_command(EV_A_ client);
-            if((-1 == CS->rt) || (ccr_break_killed == client->break_level)) {
-                ccrReturn(ctx, CS->rt);
+            CS->rt = client_ccr_read_util(client, HEADER_PREFIX);
+            if((ccr_error_err1 != CS->rt) && (CS->rt < 0)) {
+                /* socket not closed but has some other error*/
+                p = "command no found\n";
+                client_send(EV_A_ client, p, strlen(p));
+                client->break_level = ccr_break_killed;
+                ccrStop(ctx, CS->rt);
             }
-            //OK hear
-            if(0 == CS->rt) {
-                fprintf(stderr, "break from command\n");
-                //Return back for send message
-                ccrReturn(ctx, 0);
+
+            /* TODO if(client->break_level >= ccr_break_all) {
+                ccrReturn(ctx, CS->rt);
+            } else if(ccr_break_curr == client->break_level) {
+                client->break_level = ccr_break_continue;
+                ccrReturn(ctx, CS->rt);
+            } */
+
+            /* OK */
+            if(CS->rt > 0) {
                 break;
             }
+            ccrReturn(ctx, CS->rt);
+        }
+
+        assert(CS->rt > 0);
+        if(0 != memcmp(client->origin, global_magic, MAGIC_LEN)) {
+            p = "magic not found\n";
+            client_send(EV_A_ client, p, strlen(p));
+            client->break_level = ccr_break_killed;
+            ccrStop(ctx, ccr_error_err2);
+        }
+
+        if(client->origin[HEADER_PREFIX-1] != ' ') {
+            p = "header prefix error\n";
+            client_send(EV_A_ client, p, strlen(p));
+            client->break_level = ccr_break_killed;
+            ccrStop(ctx, ccr_error_err2);
+        }
+        client->origin[HEADER_PREFIX-1] = '\0';
+
+        if(S2ISUCCESS != str2int(&client->data_len, client->origin+MAGIC_LEN, 10)) {
+            p = "data len error\n";
+            client_send(EV_A_ client, p, strlen(p));
+            client->break_level = ccr_break_killed;
+            ccrStop(ctx, ccr_error_err2);
+        }
+
+        /* Reset the read_len */
+        client->read_len = 0;
+        client->read_pos = 0;
+
+        /* Sub routine */
+        memset(&client->ccr_read, 0, sizeof(struct ccrContextTag));
+        for(;;) {
+            CS->rt = client_ccr_read_util(client, client->data_len);
+            if((ccr_error_err1 != CS->rt) && (CS->rt < 0)) {
+                p = "read data error\n";
+                client_send(EV_A_ client, p, strlen(p));
+                client->break_level = ccr_break_killed;
+                ccrStop(ctx, CS->rt);
+            }
+
+            if(CS->rt > 0) {
+                break;
+            }
+            ccrReturn(ctx, CS->rt);
+        }
+
+        assert(CS->rt > 0);
+        CS->rt = client_run_command(EV_A_ client);
+        if(CS->rt < 0) {
+            client->break_level = ccr_break_killed;
+            ccrReturn(ctx, CS->rt);
+        }
+
+        /* Reset the read_len */
+        client->read_len = 0;
+        client->read_pos = 0;
+        client->command = NULL;
+        client->key = NULL;
+        if(client->origin_len > BUF_MAX) {
+            free(client->origin);
+            client->origin = NULL;
+            client->origin_len = 0;
         }
     }
-    ccrFinish(ctx, 0);
+    ccrFinish(ctx, ccr_error_ok1);
 }
 
 static skipd_client* client_new(int fd) {
