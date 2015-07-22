@@ -121,8 +121,6 @@ ev_signal signal_watcher2;
 
 static void sigint_cb (EV_P_ ev_signal *w, int revents) {
     ev_signal_stop (EV_A_ w);
-    fprintf(stderr, "exit..\n");
-    SkipDB_close(&global_server.db);
     ev_break(EV_A_ EVBREAK_ALL);
 }
 
@@ -707,6 +705,9 @@ int main(int argc, char **argv)
     // Run our loop, ostensibly forever
     puts("unix-socket-echo starting...\n");
     ev_loop(EV_A_ 0);
+
+    fprintf(stderr, "exit..\n");
+    SkipDB_close(&global_server.db);
 
     // This point is only ever reached if the loop is manually exited
     close(server->fd);
