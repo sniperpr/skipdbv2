@@ -706,8 +706,8 @@ int main(int argc, char **argv)
     puts("unix-socket-echo starting...\n");
     ev_loop(EV_A_ 0);
 
+    SkipDB_close(server->db);
     fprintf(stderr, "exit..\n");
-    SkipDB_close(&global_server.db);
 
     // This point is only ever reached if the loop is manually exited
     close(server->fd);
