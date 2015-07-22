@@ -10,6 +10,7 @@ SkipDB ioDoc(
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 
 // lookups
 
@@ -47,6 +48,8 @@ SkipDB *SkipDB_new(void)
 	self->headerPid = 0;
 	*/
 
+        self->headerPid = 1;
+
 	return self;
 }
 
@@ -78,10 +81,27 @@ void SkipDB_setPath_(SkipDB *self, char *path)
 	UDB_setPath_(self->udb, path);
 }
 
-SKIPDB_API void SkipDB_open(SkipDB *self)
+SKIPDB_API int SkipDB_open(SkipDB *self)
 {
+	Datum key;
+	Datum value;
+        
 	UDB_open(self->udb);
+
 	SkipDB_readRootRecord(self);
+
+#if 0
+        if(0 == self->headerPid) {
+	    SkipDB_beginTransaction(self);
+            key = Datum_FromCString_("__inner__");
+            value = Datum_FromCString_("init");
+	    SkipDB_at_put_(self, key, value);
+	    SkipDB_commitTransaction(self);
+	    SkipDBRecord_markAsDirty(self->header);
+        }
+#endif
+
+        return self->headerPid;
 }
 
 SKIPDB_API void SkipDB_close(SkipDB *self)

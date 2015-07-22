@@ -117,8 +117,10 @@ static int client_ccr_write(EV_P_ skipd_client* client);
 char* global_magic = MAGIC;
 skipd_server global_server;
 ev_signal signal_watcher;
+ev_signal signal_watcher2;
 
 static void sigint_cb (EV_P_ ev_signal *w, int revents) {
+    ev_signal_stop (EV_A_ w);
     fprintf(stderr, "exit..\n");
     SkipDB_close(&global_server.db);
     ev_break(EV_A_ EVBREAK_ALL);
@@ -688,6 +690,8 @@ int main(int argc, char **argv)
 
     ev_signal_init (&signal_watcher, sigint_cb, SIGINT);
     ev_signal_start (EV_A_ &signal_watcher);
+    ev_signal_init (&signal_watcher2, sigint_cb, SIGUSR1);
+    ev_signal_start (EV_A_ &signal_watcher2);
 
     // Create unix socket in non-blocking fashion
     server_init(server, max_queue);

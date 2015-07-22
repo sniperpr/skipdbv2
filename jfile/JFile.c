@@ -129,7 +129,7 @@ void JFile_open(JFile *self)
 			fcntl(fileno(self->log), F_PREALLOCATE, self->logHighWaterMark);
 		#else
 			// FIXME by jannson Linux
-			//posix_fallocate(fileno(self->log), 0, self->logHighWaterMark);
+			//posix_fallocate(fileno(self->log), -1, self->logHighWaterMark);
 		#endif
 	}
 	else

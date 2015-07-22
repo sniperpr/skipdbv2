@@ -68,7 +68,7 @@ typedef struct
 
 SKIPDB_API SkipDB *SkipDB_new(void);
 SKIPDB_API void SkipDB_setPath_(SkipDB *self, char *path);
-SKIPDB_API void SkipDB_open(SkipDB *self);
+SKIPDB_API int SkipDB_open(SkipDB *self);
 SKIPDB_API void SkipDB_close(SkipDB *self);
 SKIPDB_API void SkipDB_free(SkipDB *self);
 

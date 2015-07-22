@@ -33,6 +33,12 @@ TARGET_LINK_LIBRARIES(test m skipdb ${LIBEV_LIBRARIES})
 ADD_EXECUTABLE(test2 ./tests/test2.c)
 TARGET_LINK_LIBRARIES(test2 m skipdb ${LIBEV_LIBRARIES})
 
+ADD_EXECUTABLE(jftest ./tests/jftest.c)
+TARGET_LINK_LIBRARIES(jftest m skipdb ${LIBEV_LIBRARIES})
+
+ADD_EXECUTABLE(udbtest ./tests/udbtest.c)
+TARGET_LINK_LIBRARIES(udbtest m skipdb ${LIBEV_LIBRARIES})
+
 ADD_EXECUTABLE(example ./tests/example.c)
 TARGET_LINK_LIBRARIES(example m skipdb ${LIBEV_LIBRARIES})
 
