@@ -686,6 +686,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    //kill -SIGUSR1 22459
     ev_signal_init (&signal_watcher, sigint_cb, SIGINT);
     ev_signal_start (EV_A_ &signal_watcher);
     ev_signal_init (&signal_watcher2, sigint_cb, SIGUSR1);
