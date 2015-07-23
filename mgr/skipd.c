@@ -78,6 +78,11 @@ enum ccr_error_code {
     ccr_error_ok2 = 2
 };
 
+enum run_cmd_state {
+    run_cmd_state_default = 0,
+    run_cmd_state_list
+};
+
 typedef struct _skipd_client {
     ev_io io_read;
     ev_io io_write;
@@ -87,6 +92,7 @@ typedef struct _skipd_client {
     struct ccrContextTag ccr_process;
     //struct ccrContextTag ccr_runcmd;
     int break_level;
+    int run_cmd_state;
 
     int fd;
 
@@ -213,7 +219,7 @@ static void client_write(EV_P_ ev_io *w, int revents) {
     } else if(0 == rt) {
         if(ccr_break_killed == client->break_level) {
             client_release(EV_A_ client);
-        } 
+        }
     } else {
             // rt > 0, So reset it
             memset(&client->ccr_write, 0, sizeof(struct ccrContextTag));
@@ -276,6 +282,9 @@ static int client_send(EV_P_ skipd_client* client, char* buf, int len) {
     ev_io_start(EV_A_ &client->io_write);
 
     return 0;
+}
+
+static int client_runcmd_at_write(EV_P_ skipd_client* client) {
 }
 
 static int client_ccr_write(EV_P_ skipd_client* client) {
@@ -399,9 +408,9 @@ static int client_run_command(EV_P_ skipd_client* client) {
 
         dkey = Datum_FromCString_(client->key);
         dvalue = Datum_FromData_length_((unsigned char*)p1, client->data_len - (p1 - client->origin));
-	SkipDB_beginTransaction(client->server->db);
+        SkipDB_beginTransaction(client->server->db);
         SkipDB_at_put_(client->server->db, dkey, dvalue);
-	SkipDB_commitTransaction(client->server->db);
+        SkipDB_commitTransaction(client->server->db);
 
         p1 = "ok\n";
         client_send(EV_A_ client, p1, strlen(p1));
@@ -418,7 +427,7 @@ static int client_run_command(EV_P_ skipd_client* client) {
         p1 = p2+1;
 
         dkey = Datum_FromCString_(client->key);
-	dvalue = SkipDB_at_(client->server->db, dkey);
+        dvalue = SkipDB_at_(client->server->db, dkey);
         if(NULL == dvalue.data) {
             p1 = "none\n";
             client_send(EV_A_ client, p1, strlen(p1));
@@ -428,6 +437,15 @@ static int client_run_command(EV_P_ skipd_client* client) {
         return ccr_error_ok1;
     } else if(!strcmp(client->command, "replace")) {
     } else if(!strcmp(client->command, "list")) {
+        p1 = p2+1;
+        p2 = strstr(p1, "\n");
+        if(NULL == p2) {
+            return ccr_error_err2;
+        }
+        *p2 = '\0';
+        client->key = p1;
+        p1 = p2+1;
+        ;
     } else if(!strcmp(client->command, "delay")) {
     } else if(!strcmp(client->command, "time")) {
     }
@@ -523,6 +541,9 @@ static int client_ccr_process(EV_P_ skipd_client* client) {
             p = "run command error\n";
             client_send(EV_A_ client, p, strlen(p));
             client->break_level = ccr_break_killed;
+            ccrReturn(ctx, CS->rt);
+        } else if(ccr_error_ok == CS->rt) {
+            /* Important */
             ccrReturn(ctx, CS->rt);
         }
 
