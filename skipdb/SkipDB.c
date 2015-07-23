@@ -805,9 +805,39 @@ void SkipDB_mergeInto_(SkipDB *self, SkipDB *other)
 	}
 }
 
+SkipDBRecord* SkipDB_list_first(SkipBD* self, Datum k, SkipDBCursor** pcur) {
+    SkipDBCursor* cursor = SkipDB_createCursor(self);
+    SkipDBRecord* rc = SkipDBCursor_goto_(cursor, k);
+
+    *pcur = rc;
+    if(NULL == rc) {
+        return NULL;
+    }
+
+    t = SkipDBRecord_valueDatum(rc);
+    //printf("k.size=%d t.size=%d k=%s t=%s\n", k.size, t.size, k.data, t.data);
+    if((k.size <= t.size) && (0 == strncmp((char*)t.data, (char*)k.data, k.size-1))) {
+        return rc;
+    } else {
+        return SkipDB_list_next(self, k, cursor);
+    }
+}
+
+SkipDBRecord* SkipDB_list_next(SkipDB* self, Datum k, SkipDBCursor* cursor) {
+    Datum t;
+    SkipDBRecord* rc = SkipDBCursor_next(cursor);
+    if(NULL != rc) {
+        t = SkipDBRecord_valueDatum(rc);
+        if(!((k.size <= t.size) && (0 == strncmp((char*)t.data, (char*)k.data, k.size-1)))) {
+            rc = NULL;
+        }
+    }
+    return rc;
+}
+
 void SkipDB_list_prefix(SkipDB* self, Datum k, void* ctx, skipdb_list_callback callback)
 {
-	Datum t;
+    Datum t;
     SkipDBCursor* cursor = SkipDB_createCursor(self);
     SkipDBRecord* rc = SkipDBCursor_goto_(cursor, k);
     if(NULL == rc) {

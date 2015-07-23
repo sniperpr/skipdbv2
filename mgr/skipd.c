@@ -78,11 +78,6 @@ enum ccr_error_code {
     ccr_error_ok2 = 2
 };
 
-enum run_cmd_state {
-    run_cmd_state_default = 0,
-    run_cmd_state_list
-};
-
 typedef struct _skipd_client {
     ev_io io_read;
     ev_io io_write;
@@ -90,9 +85,8 @@ typedef struct _skipd_client {
     struct ccrContextTag ccr_read;
     struct ccrContextTag ccr_write;
     struct ccrContextTag ccr_process;
-    //struct ccrContextTag ccr_runcmd;
+    struct ccrContextTag ccr_runcmd;
     int break_level;
-    int run_cmd_state;
 
     int fd;
 
@@ -387,11 +381,21 @@ static int client_ccr_read_util(skipd_client* client, int step_len) {
 static int client_run_command(EV_P_ skipd_client* client) {
     char *p1, *p2;
     Datum dkey, dvalue;
+    struct ccrContextTag* ctx = &client->ccr_read;
+
+    //stack
+    ccrBeginContext
+    int n;
+    SkipDBCursor* cursor;
+    SkipDBRecord* record;
+    ccrEndContext(ctx);
+
+    ccrBegin(ctx);
 
     p1 = client->origin;
     p2 = strstr(p1, " ");
     if(NULL == p2) {
-        return ccr_error_err2;
+        ccrStop(ctx, ccr_error_err2);
     }
     *p2 = '\0';
     client->command = p1;
@@ -400,7 +404,7 @@ static int client_run_command(EV_P_ skipd_client* client) {
         p1 = p2+1;
         p2 = strstr(p1, " ");
         if(NULL == p2) {
-            return ccr_error_err2;
+            ccrStop(ctx, ccr_error_err2);
         }
         *p2 = '\0';
         client->key = p1;
@@ -415,12 +419,12 @@ static int client_run_command(EV_P_ skipd_client* client) {
         p1 = "ok\n";
         client_send(EV_A_ client, p1, strlen(p1));
         fprintf(stderr, "resp: %s\n", client->send);
-        return ccr_error_ok1;
+        ccrReturn(ctx, ccr_error_ok1);
     } else if(!strcmp(client->command, "get")) {
         p1 = p2+1;
         p2 = strstr(p1, "\n");
         if(NULL == p2) {
-            return ccr_error_err2;
+            ccrStop(ctx, ccr_error_err2);
         }
         *p2 = '\0';
         client->key = p1;
@@ -434,23 +438,31 @@ static int client_run_command(EV_P_ skipd_client* client) {
         } else {
             client_send(EV_A_ client, dvalue.data, dvalue.size);
         }
-        return ccr_error_ok1;
+        ccrReturn(ctx, ccr_error_ok1);
     } else if(!strcmp(client->command, "replace")) {
     } else if(!strcmp(client->command, "list")) {
         p1 = p2+1;
         p2 = strstr(p1, "\n");
         if(NULL == p2) {
-            return ccr_error_err2;
+            ccrStop(ctx, ccr_error_err2);
         }
         *p2 = '\0';
         client->key = p1;
         p1 = p2+1;
-        ;
+
+        dkey = Datum_FromCString_(client->key);
+        CS->record = SkipDB_list_first(client->servier->db, dkey, &CS->cursor);
+        while(NULL != CS->record) {
+        }
+	dkey = SkipDBRecord_keyDatum(CS->record);
+        dvalue = SkipDBRecord_valueDatum(CS->record);
+
+        ccrReturn(ctx, ccr_error_ok1);
     } else if(!strcmp(client->command, "delay")) {
     } else if(!strcmp(client->command, "time")) {
     }
 
-    return ccr_error_err2;
+    ccrFinish(ctx, ccr_error_err2);
 }
 
 static int client_ccr_process(EV_P_ skipd_client* client) {
@@ -536,14 +548,20 @@ static int client_ccr_process(EV_P_ skipd_client* client) {
 
         assert(CS->rt > 0);
         client->origin[client->data_len] = '\0';
-        CS->rt = client_run_command(EV_A_ client);
-        if(CS->rt < 0) {
-            p = "run command error\n";
-            client_send(EV_A_ client, p, strlen(p));
-            client->break_level = ccr_break_killed;
-            ccrReturn(ctx, CS->rt);
-        } else if(ccr_error_ok == CS->rt) {
-            /* Important */
+
+        // Command subroutine
+        memset(&client->ccr_runcmd, 0, sizeof(struct ccrContextTag));
+        for(;;) {
+            CS->rt = client_run_command(EV_A_ client);
+            if(CS->rt < 0) {
+                p = "run command error\n";
+                client_send(EV_A_ client, p, strlen(p));
+                client->break_level = ccr_break_killed;
+                ccrReturn(ctx, CS->rt);
+            } 
+            if(CS->rt > 0) {
+                break;
+            }
             ccrReturn(ctx, CS->rt);
         }
 
