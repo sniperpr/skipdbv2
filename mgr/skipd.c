@@ -171,9 +171,7 @@ static void client_release(EV_P_ skipd_client* client) {
     free(client);
 }
 
-// This callback is called when client data is available
-static void client_read(EV_P_ ev_io *w, int revents) {
-    skipd_client* client = container_of(w, skipd_client, io_read);
+static void client_read_inner(EV_P_ skipd_client* client, int revents) {
     int rt;
 
     //process command
@@ -204,6 +202,12 @@ static void client_read(EV_P_ ev_io *w, int revents) {
     }
 }
 
+// This callback is called when client data is available
+static void client_read(EV_P_ ev_io *w, int revents) {
+    skipd_client* client = container_of(w, skipd_client, io_read);
+    client_read_inner(EV_A_ client, revents);
+}
+
 static void client_write(EV_P_ ev_io *w, int revents) {
     skipd_client* client = container_of(w, skipd_client, io_write);
     int rt;
@@ -224,6 +228,7 @@ static void client_write(EV_P_ ev_io *w, int revents) {
 
             //change to read state directly
             //event_active(&client->io_read, EV_READ, 0);
+            client_read_inner(EV_A_ client, 0);
     }
 
     //TODO void event_active (struct event *ev, int res, short ncalls)
@@ -383,6 +388,7 @@ static int client_run_command(EV_P_ skipd_client* client) {
     int n;
     SkipDBCursor* cursor;
     SkipDBRecord* record;
+    Datum skey
     ccrEndContext(ctx);
 
     ccrBegin(ctx);
@@ -445,15 +451,15 @@ static int client_run_command(EV_P_ skipd_client* client) {
         client->key = p1;
         p1 = p2+1;
 
-        dkey = Datum_FromCString_(client->key);
-        CS->record = SkipDB_list_first(client->server->db, dkey, &CS->cursor);
+        CS->skey = Datum_FromCString_(client->key);
+        CS->record = SkipDB_list_first(client->server->db, CS->skey, &CS->cursor);
         while(NULL != CS->record) {
             dkey = SkipDBRecord_keyDatum(CS->record);
             dvalue = SkipDBRecord_valueDatum(CS->record);
             client_send_key(EV_A_ client, client->command, (char*)dkey.data, (char*)dvalue.data, dvalue.size);
             ccrReturn(ctx, ccr_error_ok);
 
-            CS->record = SkipDB_list_next(client->server->db, dkey, CS->cursor);
+            CS->record = SkipDB_list_next(client->server->db, CS->skey, CS->cursor);
         }
 
         if(NULL != CS->cursor) {
