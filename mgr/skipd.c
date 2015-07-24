@@ -108,6 +108,9 @@ typedef struct _skipd_client {
 } skipd_client;
 
 /* declare */
+extern SkipDBRecord* SkipDB_list_first(SkipDB* self, Datum k, SkipDBCursor** pcur);
+extern SkipDBRecord* SkipDB_list_next(SkipDB* self, Datum k, SkipDBCursor* cursor);
+
 extern int skipd_daemonize(char *_lock_path);
 static int setnonblock(int fd);
 static void not_blocked(EV_P_ ev_periodic *w, int revents);
@@ -218,35 +221,23 @@ static void client_write(EV_P_ ev_io *w, int revents) {
             // rt > 0, So reset it
             memset(&client->ccr_write, 0, sizeof(struct ccrContextTag));
             client->break_level = 0;
+
+            //change to read state directly
+            //event_active(&client->io_read, EV_READ, 0);
     }
 
     //TODO void event_active (struct event *ev, int res, short ncalls)
 }
 
-#define UNKNOWN_LEN 7
-static int client_send(EV_P_ skipd_client* client, char* buf, int len) {
-    static char* unknown = "unknown";
-    char pref_buf[HEADER_PREFIX], *pc, *pk;
-    int n, clen = (NULL == client->command ? 0 : strlen(client->command));
-    int klen = (NULL == client->key ? 0 : strlen(client->key));
+static int client_send_key(EV_P_ skipd_client* client, char* cmd, char* key, char* buf, int len) {
+    char pref_buf[HEADER_PREFIX];
+    int n, resp_len = (len + 2);
 
     memcpy(pref_buf, global_magic, MAGIC_LEN);
 
-    int resp_len = len + 2;
-    if(0 == clen) {
-        pc = unknown;
-        resp_len += UNKNOWN_LEN;
-    } else {
-        pc = client->command;
-        resp_len += clen;
-    }
-    if(0 == klen) {
-        pk = unknown;
-        resp_len += UNKNOWN_LEN;
-    } else {
-        pk = client->key;
-        resp_len += klen;
-    }
+    resp_len += strlen(cmd);
+    resp_len += strlen(key);
+
     sprintf(pref_buf + MAGIC_LEN, "%07d ", resp_len);
     resp_len += HEADER_PREFIX;
 
@@ -264,7 +255,7 @@ static int client_send(EV_P_ skipd_client* client, char* buf, int len) {
     }
 
     memcpy(client->send, pref_buf, HEADER_PREFIX);
-    n = sprintf(client->send + HEADER_PREFIX, "%s %s ", pc, pk);
+    n = sprintf(client->send + HEADER_PREFIX, "%s %s ", cmd, key);
     memcpy(client->send + HEADER_PREFIX + n, buf, len);
     client->send[resp_len] = '\0';
     client->send_len = resp_len;
@@ -278,7 +269,11 @@ static int client_send(EV_P_ skipd_client* client, char* buf, int len) {
     return 0;
 }
 
-static int client_runcmd_at_write(EV_P_ skipd_client* client) {
+static int client_send(EV_P_ skipd_client* client, char* buf, int len) {
+    return client_send_key(EV_A_ client
+            , (NULL == client->command ? "errcmd": client->command)
+            , (NULL == client->key ? "errkey": client->key)
+            , buf, len);
 }
 
 static int client_ccr_write(EV_P_ skipd_client* client) {
@@ -436,7 +431,7 @@ static int client_run_command(EV_P_ skipd_client* client) {
             p1 = "none\n";
             client_send(EV_A_ client, p1, strlen(p1));
         } else {
-            client_send(EV_A_ client, dvalue.data, dvalue.size);
+            client_send(EV_A_ client, (char*)dvalue.data, dvalue.size);
         }
         ccrReturn(ctx, ccr_error_ok1);
     } else if(!strcmp(client->command, "replace")) {
@@ -451,11 +446,19 @@ static int client_run_command(EV_P_ skipd_client* client) {
         p1 = p2+1;
 
         dkey = Datum_FromCString_(client->key);
-        CS->record = SkipDB_list_first(client->servier->db, dkey, &CS->cursor);
+        CS->record = SkipDB_list_first(client->server->db, dkey, &CS->cursor);
         while(NULL != CS->record) {
+            dkey = SkipDBRecord_keyDatum(CS->record);
+            dvalue = SkipDBRecord_valueDatum(CS->record);
+            client_send_key(EV_A_ client, client->command, (char*)dkey.data, (char*)dvalue.data, dvalue.size);
+            ccrReturn(ctx, ccr_error_ok);
+
+            CS->record = SkipDB_list_next(client->server->db, dkey, CS->cursor);
         }
-	dkey = SkipDBRecord_keyDatum(CS->record);
-        dvalue = SkipDBRecord_valueDatum(CS->record);
+
+        if(NULL != CS->cursor) {
+            SkipDBCursor_release(CS->cursor);
+        }
 
         ccrReturn(ctx, ccr_error_ok1);
     } else if(!strcmp(client->command, "delay")) {
@@ -558,7 +561,7 @@ static int client_ccr_process(EV_P_ skipd_client* client) {
                 client_send(EV_A_ client, p, strlen(p));
                 client->break_level = ccr_break_killed;
                 ccrReturn(ctx, CS->rt);
-            } 
+            }
             if(CS->rt > 0) {
                 break;
             }
@@ -578,7 +581,7 @@ static int client_ccr_process(EV_P_ skipd_client* client) {
 }
 
 static skipd_client* client_new(int fd) {
-    int opt = 0;
+    //int opt = 0;
     skipd_client* client = (skipd_client*)calloc(1, sizeof(skipd_client));
     client->fd = fd;
     client->send = NULL;
@@ -629,7 +632,7 @@ int setnonblock(int fd) {
 
 int unix_socket_init(struct sockaddr_un* socket_un, char* sock_path, int max_queue) {
     int fd;
-    int opt = 0;
+    //int opt = 0;
 
     unlink(sock_path);
 

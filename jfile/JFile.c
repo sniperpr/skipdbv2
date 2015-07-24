@@ -2,7 +2,7 @@
 JFile ioDoc(
 		  docCopyright("Steve Dekorte", 2004)
 		  docLicense("BSD revised")
-		  docObject("JFile")    
+		  docObject("JFile")
 		  docDescription("A journaled file.")
 		  log file is currently endian dependent
 */
@@ -103,24 +103,24 @@ void JFile_remove(JFile *self)
 void JFile_open(JFile *self)
 {
 	self->file = fopen(self->path, "r+");
-	
-	if (!self->file) 
+
+	if (!self->file)
 	{
-		// if it doesn't exist, create file 
+		// if it doesn't exist, create file
 		self->file = fopen(self->path, "w");
 		fclose(self->file);
 		self->file = fopen(self->path, "r+");
 	}
-	
+
 	self->pos = 0;
 	fseek(self->file, 0, SEEK_END);
 	self->maxPos = ftell(self->file);
-	
+
 	self->log = fopen(self->logPath, "r+");
-	
-	if (!self->log) 
+
+	if (!self->log)
 	{
-		// if log doesn't exist, create it 
+		// if log doesn't exist, create it
 		self->log = fopen(self->logPath, "w");
 		fclose(self->log);
 		self->log = fopen(self->logPath, "r+");
@@ -142,13 +142,13 @@ void JFile_open(JFile *self)
 
 void JFile_close(JFile *self)
 {
-	if (self->file) 
+	if (self->file)
 	{
 		fclose(self->file);
 		self->file = NULL;
 	}
-	
-	if (self->log) 
+
+	if (self->log)
 	{
 		fclose(self->log);
 		self->log = NULL;
@@ -166,12 +166,12 @@ size_t JFile_fwrite(JFile *self, void *buf, size_t size, size_t nobjs)
 {
 	size_t total = size * nobjs;
 	size_t nobjsWritten;
-	
+
 	if (self->journalingOn)
 	{
 		fwrite(&(self->pos), sizeof(long), 1, self->log);
 		fwrite(&total, sizeof(size_t), 1, self->log);
-		nobjsWritten = fwrite(buf, size, nobjs, self->log);		
+		nobjsWritten = fwrite(buf, size, nobjs, self->log);
 		fputc(JFILE_END_TRANSACTION_ITEM, self->log); // commit byte
 		self->pos += total;
 	}
@@ -181,25 +181,25 @@ size_t JFile_fwrite(JFile *self, void *buf, size_t size, size_t nobjs)
 		nobjsWritten = fwrite(buf, size, nobjs, self->file);
 		self->pos = ftell(self->file);
 	}
-	
+
 	if (nobjs != nobjsWritten)
 	{
 		printf("Error: JFile_fwrite nobjs != nobjsWritten\n");
 	}
-	
+
 	if (self->pos > self->maxPos) self->maxPos = self->pos;
-	
+
 	return nobjsWritten;
 }
 
 size_t JFile_fread(JFile *self, void *buf, size_t size, size_t nobjs)
 {
 	size_t nobjsRead;
-	
+
 	fseek(self->file, self->pos, SEEK_SET);
 	nobjsRead = fread(buf, size, nobjs, self->file);
 	self->pos = ftell(self->file);
-	
+
 	return nobjsRead;
 }
 
@@ -229,16 +229,16 @@ int JFile_readInt(JFile *self)
 	return v;
 }
 
-void JFile_setPosition_(JFile *self, long pos) 
+void JFile_setPosition_(JFile *self, long pos)
 {
 	self->pos = pos;
 }
 
-void JFile_fseek(JFile *self, long offset, int whence) 
+void JFile_fseek(JFile *self, long offset, int whence)
 {
 	switch (whence)
 	{
-		case SEEK_CUR: 
+		case SEEK_CUR:
 			self->pos += offset;
 			break;
 		case SEEK_SET:
@@ -250,8 +250,8 @@ void JFile_fseek(JFile *self, long offset, int whence)
 	}
 }
 
-long JFile_position(JFile *self) 
-{ 
+long JFile_position(JFile *self)
+{
 	return self->pos;
 }
 
@@ -266,7 +266,7 @@ void JFile_hardSyncFileDescriptor_(JFile *self, int fd)
 	#ifdef F_FULLFSYNC
 		fcntl(fd, F_FULLFSYNC, NULL);
 	#else
-		#warning Linux can't ensure data sync to physical media
+		#warning Linux cant ensure data sync to physical media
 		fsync(fd);
 	#endif
 }
@@ -275,8 +275,8 @@ void JFile_syncFileWritesToDisk(JFile *self)
 {
 	//printf("f"); fflush(stdout);
 	fflush(self->file);
-	
-	if(self->fullSync) 
+
+	if(self->fullSync)
 	{
 		JFile_hardSyncFileDescriptor_(self, fileno(self->file));
 	}
@@ -286,17 +286,17 @@ void JFile_syncLogWritesToDisk(JFile *self)
 {
 	//printf("j"); fflush(stdout);
 	fflush(self->log);
-	if (self->fullSync) 
+	if (self->fullSync)
 	{
 			JFile_hardSyncFileDescriptor_(self, fileno(self->log));
 	}
-	
+
 	fseek(self->log, -1, SEEK_END);
-	
+
 	fputc(JFILE_END_TRANSACTION, self->log);
-	
+
 	fflush(self->log);
-	if (self->fullSync) 
+	if (self->fullSync)
 	{
 			JFile_hardSyncFileDescriptor_(self, fileno(self->log));
 	}
@@ -304,14 +304,14 @@ void JFile_syncLogWritesToDisk(JFile *self)
 
 void JFile_writeLogToFileIfNeeded(JFile *self)
 {
-	if (ftell(self->log)) 
+	if (ftell(self->log))
 	{
 		JFile_writeLogToFile(self);
 	}
 }
 
 void JFile_writeLogToFile(JFile *self)
-{	
+{
 	size_t writeCount = 0;
 	int logNotEmpty = 0;
 	int lastTerminator = 0;
@@ -321,8 +321,8 @@ void JFile_writeLogToFile(JFile *self)
 	{
 		long pos;
 		size_t total;
-			
-		if (fread(&pos, sizeof(long), 1, self->log) != 1) 
+
+		if (fread(&pos, sizeof(long), 1, self->log) != 1)
 		{
 			if (feof(self->log)) break;
 			printf("JFile: error reading pos\n");
@@ -334,47 +334,47 @@ void JFile_writeLogToFile(JFile *self)
 			printf("JFile: error reading total\n");
 			goto fatalError;
 		}
-		
+
                 //by janson, TODO better
                 if (0 == total) {
                     return;
                 }
 
 		self->buf = realloc(self->buf, total);
-		
-		if (fread(self->buf, total, 1, self->log) != 1) 
+
+		if (fread(self->buf, total, 1, self->log) != 1)
 		{
 			printf("JFile: error reading buf %d\n", total);
 			goto fatalError;
 		}
 
 		lastTerminator = fgetc(self->log);
-		
+
 		if (lastTerminator != JFILE_END_TRANSACTION_ITEM &&
 			lastTerminator != JFILE_END_TRANSACTION)
 		{
 			printf("JFile: invalid log terminator\n");
 			goto fatalError;
 		}
-		
+
 		fseek(self->file, pos, SEEK_SET);
 		fwrite(self->buf, total, 1, self->file);
 		writeCount ++;
 		logNotEmpty = 1;
 	}
-	
+
 	if (logNotEmpty)
 	{
 		//printf("writing log\n");
 		JFile_syncFileWritesToDisk(self);
 		JFile_clipLog(self);
 	}
-	
+
 	return;
-	
+
 	fatalError:
 		printf("JFile: FATAL ERROR: invalid log file '%s' - may result in inconsistency\n", self->logPath);
-	
+
 }
 
 
@@ -415,7 +415,7 @@ void JFile_commitToLog(JFile *self)
 
 void JFile_clipLog(JFile *self)
 {
-	if (!self->log) 
+	if (!self->log)
 	{
 		self->log = fopen(self->logPath, "r+");
 
@@ -436,7 +436,7 @@ void JFile_truncate_(JFile *self, off_t size)
 {
 	JFile_commitToLog(self);
 	JFile_commitToFile(self);
-	ftruncate(fileno(self->file), size); 
+	ftruncate(fileno(self->file), size);
 }
 
 int JFile_needsSync(JFile *self)
@@ -453,7 +453,7 @@ size_t JFile_logSize(JFile *self)
 long JFile_lastCommitPosition(JFile *self)
 {
 	long lastCommitPosition = 0;
-	long end; 
+	long end;
 	fseek(self->log, 0, SEEK_END);
 	end = ftell(self->log);
 	fseek(self->log, 0, SEEK_SET);
@@ -463,35 +463,35 @@ long JFile_lastCommitPosition(JFile *self)
 		long pos;
 		size_t total;
 		int r;
-		
+
 		r = fread(&pos, sizeof(long), 1, self->log);
-		if (r != 1) 
+		if (r != 1)
 		{
 			if (feof(self->log)) break;
 
 			//printf("log broken at pos");
 			break;
 		}
-		
+
 		r = fread(&total, sizeof(size_t), 1, self->log);
-		if (r != 1) 
+		if (r != 1)
 		{
 			//printf("log broken at size");
 			break;
 		}
-		
+
 		if(fseek(self->log, total, SEEK_CUR) != 0)
 		{
 			//printf("log broken at data");
-			break;		
+			break;
 		}
-		
+
 		switch (fgetc(self->log))
 		{
 			case JFILE_END_TRANSACTION_ITEM:
 				//printf("JFILE_END_TRANSACTION_ITEM at %i\n", ftell(self->log));
 				continue;
-			case JFILE_END_TRANSACTION: 
+			case JFILE_END_TRANSACTION:
 				//printf("JFILE_END_TRANSACTION at %i\n", ftell(self->log));
 				lastCommitPosition = ftell(self->log);
 				continue;
@@ -499,29 +499,29 @@ long JFile_lastCommitPosition(JFile *self)
 				break;
 		}
 	}
-	
+
 	fseek(self->log, 0, SEEK_END);
 	return lastCommitPosition;
-}	
+}
 
 int JFile_verifyLog(JFile *self)
 {
 	long lastCommitPosition = JFile_lastCommitPosition(self);
-	
+
 	fseek(self->log, 0, SEEK_END);
-	
+
 	return lastCommitPosition == ftell(self->log);
 }
 
 void JFile_clipLogToLastCompletedTransaction(JFile *self)
 {
 	long lastCommitPosition = JFile_lastCommitPosition(self);
-	
+
 	fseek(self->log, 0, SEEK_END);
-	
+
 	if (lastCommitPosition != ftell(self->log))
 	{
-		printf("JFile: incomplete transaction found in '%s' - discarding\n", self->logPath);	
+		printf("JFile: incomplete transaction found in '%s' - discarding\n", self->logPath);
 		ftruncate(fileno(self->log), lastCommitPosition);
 		fseek(self->log, 0, SEEK_END);
 	}

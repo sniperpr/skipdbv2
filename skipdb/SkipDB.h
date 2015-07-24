@@ -160,8 +160,6 @@ SKIPDB_API void SkipDB_removeCursor_(SkipDB *self, SkipDBCursor *cursor);
 
 SKIPDB_API void SkipDB_mergeInto_(SkipDB *self, SkipDB *other);
 
-SkipDBRecord* SkipDB_list_first(SkipBD* self, Datum k, SkipDBCursor** pcur);
-SkipDBRecord* SkipDB_list_next(SkipDB* self, Datum k, SkipDBCursor* cursor);
 typedef void (*skipdb_list_callback)(SkipDB* self, SkipDBRecord* rc, void* ctx);
 SKIPDB_API void SkipDB_list_prefix(SkipDB* self, Datum k, void* ctx, skipdb_list_callback callback);
 

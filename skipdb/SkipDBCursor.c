@@ -2,7 +2,7 @@
 SkipDBCursor ioDoc(
 			    docCopyright("Steve Dekorte", 2004)
 			    docLicense("BSD revised")
-			    docObject("SkipDBCursor")    
+			    docObject("SkipDBCursor")
 			    docDescription("A cursor for a skipdb.")
 			    */
 
@@ -36,7 +36,7 @@ void SkipDBCursor_dealloc(SkipDBCursor *self)
 void SkipDBCursor_release(SkipDBCursor *self)
 {
 	self->refCount --;
-	
+
 	if (self->refCount == 0)
 	{
 		SkipDBCursor_dealloc(self);
@@ -73,10 +73,10 @@ SkipDBRecord *SkipDBCursor_current(SkipDBCursor *self)
 
 SkipDBRecord *SkipDBCursor_previous(SkipDBCursor *self)
 {
-	if (self->record) 
+	if (self->record)
 	{
 		self->record = SkipDBRecord_previousRecord(self->record);
-		
+
 		if (self->record == SkipDB_headerRecord(self->sdb))
 		{
 			self->record = NULL;
@@ -87,10 +87,11 @@ SkipDBRecord *SkipDBCursor_previous(SkipDBCursor *self)
 
 SkipDBRecord *SkipDBCursor_next(SkipDBCursor *self)
 {
-	if (!self->record) 
+	if (!self->record)
 	{
 		return NULL;
 	}
-	
+
 	return (self->record = SkipDBRecord_nextRecord(self->record));
 }
+

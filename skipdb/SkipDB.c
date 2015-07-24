@@ -83,9 +83,11 @@ void SkipDB_setPath_(SkipDB *self, char *path)
 
 SKIPDB_API int SkipDB_open(SkipDB *self)
 {
+    /*
 	Datum key;
 	Datum value;
-        
+    */
+
 	UDB_open(self->udb);
 
 	SkipDB_readRootRecord(self);
@@ -805,36 +807,6 @@ void SkipDB_mergeInto_(SkipDB *self, SkipDB *other)
 	}
 }
 
-SkipDBRecord* SkipDB_list_first(SkipBD* self, Datum k, SkipDBCursor** pcur) {
-    SkipDBCursor* cursor = SkipDB_createCursor(self);
-    SkipDBRecord* rc = SkipDBCursor_goto_(cursor, k);
-
-    *pcur = rc;
-    if(NULL == rc) {
-        return NULL;
-    }
-
-    t = SkipDBRecord_valueDatum(rc);
-    //printf("k.size=%d t.size=%d k=%s t=%s\n", k.size, t.size, k.data, t.data);
-    if((k.size <= t.size) && (0 == strncmp((char*)t.data, (char*)k.data, k.size-1))) {
-        return rc;
-    } else {
-        return SkipDB_list_next(self, k, cursor);
-    }
-}
-
-SkipDBRecord* SkipDB_list_next(SkipDB* self, Datum k, SkipDBCursor* cursor) {
-    Datum t;
-    SkipDBRecord* rc = SkipDBCursor_next(cursor);
-    if(NULL != rc) {
-        t = SkipDBRecord_valueDatum(rc);
-        if(!((k.size <= t.size) && (0 == strncmp((char*)t.data, (char*)k.data, k.size-1)))) {
-            rc = NULL;
-        }
-    }
-    return rc;
-}
-
 void SkipDB_list_prefix(SkipDB* self, Datum k, void* ctx, skipdb_list_callback callback)
 {
     Datum t;
@@ -844,7 +816,7 @@ void SkipDB_list_prefix(SkipDB* self, Datum k, void* ctx, skipdb_list_callback c
         goto list_finish;
     }
 
-    t = SkipDBRecord_valueDatum(rc);
+    t = SkipDBRecord_keyDatum(rc);
     //printf("k.size=%d t.size=%d k=%s t=%s\n", k.size, t.size, k.data, t.data);
     if((k.size <= t.size) && (0 == strncmp((char*)t.data, (char*)k.data, k.size-1))) {
         (*callback)(self, rc, ctx);
@@ -852,7 +824,7 @@ void SkipDB_list_prefix(SkipDB* self, Datum k, void* ctx, skipdb_list_callback c
 
     rc = SkipDBCursor_next(cursor);
     while(NULL != rc) {
-        t = SkipDBRecord_valueDatum(rc);
+        t = SkipDBRecord_keyDatum(rc);
         if((k.size <= t.size) && (0 == strncmp((char*)t.data, (char*)k.data, k.size-1))) {
             (*callback)(self, rc, ctx);
             rc = SkipDBCursor_next(cursor);
@@ -864,5 +836,37 @@ void SkipDB_list_prefix(SkipDB* self, Datum k, void* ctx, skipdb_list_callback c
 list_finish:
     if(NULL != cursor) {
         SkipDBCursor_release(cursor);
+    }
+}
+
+/* TODO howto make better */
+SkipDBRecord* SkipDB_list_next(SkipDB* self, Datum k, SkipDBCursor* cursor) {
+    Datum t;
+    SkipDBRecord* rc = SkipDBCursor_next(cursor);
+    if(NULL != rc) {
+        t = SkipDBRecord_keyDatum(rc);
+        if(!((k.size <= t.size) && (0 == strncmp((char*)t.data, (char*)k.data, k.size-1)))) {
+            rc = NULL;
+        }
+    }
+    return rc;
+}
+
+SkipDBRecord* SkipDB_list_first(SkipDB* self, Datum k, SkipDBCursor** pcur) {
+    Datum t;
+    SkipDBCursor* cursor = SkipDB_createCursor(self);
+    SkipDBRecord* rc = SkipDBCursor_goto_(cursor, k);
+
+    *pcur = cursor;
+    if(NULL == rc) {
+        return NULL;
+    }
+
+    t = SkipDBRecord_keyDatum(rc);
+    //printf("k.size=%d t.size=%d k=%s t=%s\n", k.size, t.size, k.data, t.data);
+    if((k.size <= t.size) && (0 == strncmp((char*)t.data, (char*)k.data, k.size-1))) {
+        return rc;
+    } else {
+        return SkipDB_list_next(self, k, cursor);
     }
 }
