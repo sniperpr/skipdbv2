@@ -462,6 +462,11 @@ static int client_run_command(EV_P_ skipd_client* client) {
             CS->record = SkipDB_list_next(client->server->db, CS->skey, CS->cursor);
         }
 
+        //send end
+        p1 = "__end__\n";
+        client_send(EV_A_ client, p1, strlen(p1));
+        ccrReturn(ctx, ccr_error_ok);
+
         if(NULL != CS->cursor) {
             SkipDBCursor_release(CS->cursor);
         }
