@@ -192,6 +192,7 @@ dbclient* gclient;
 int main(int argc, char **argv)
 { 
     int n1, n2;
+    struct tm tm1;
     dbclient* client;
     int remote_fd = create_client_fd("/tmp/.skipd_server_sock");
     if(-1 == remote_fd) {
@@ -297,7 +298,40 @@ int main(int argc, char **argv)
 
         setnonblock(remote_fd);
         n1 = parse_common_result(client);
-    } 
+    } else if(!strcmp("delay", argv[1])) {
+        if(argc < 5) {
+            return -13;
+        }
+        if(S2ISUCCESS != str2int(&n2, argv[3], 10)) {
+            return -16;
+        }
+
+        strcpy(client->command, argv[1]);
+        n1 = strlen(client->command) + strlen(argv[2]) + strlen(argv[3]) + strlen(argv[4]) + 4;
+        check_buf(client, n1 + HEADER_PREFIX);
+        n2 = snprintf(client->buf, client->buf_max, "%s%07d %s %s %s %s\n", MAGIC, n1, client->command, argv[2], argv[3], argv[4]);
+        write(remote_fd, client->buf, n2);
+
+        setnonblock(remote_fd);
+        n1 = parse_common_result(client);
+    } else if(!strcmp("time", argv[1])) {
+        if(argc < 5) {
+            return -13;
+        }
+
+        if(NULL == strptime(argv[3], "%H:%M:%S", &tm1)) {
+            return -17;
+        }
+
+        strcpy(client->command, argv[1]);
+        n1 = strlen(client->command) + strlen(argv[2]) + strlen(argv[3]) + strlen(argv[4]) + 4;
+        check_buf(client, n1 + HEADER_PREFIX);
+        n2 = snprintf(client->buf, client->buf_max, "%s%07d %s %s %s %s\n", MAGIC, n1, client->command, argv[2], argv[3], argv[4]);
+        write(remote_fd, client->buf, n2);
+
+        setnonblock(remote_fd);
+        n1 = parse_common_result(client);
+    }
 
     close(remote_fd);
     if(NULL != gclient->buf) {

@@ -10,13 +10,13 @@
 #include <string.h>
 #include <signal.h>
 #include <assert.h>
-#include <time.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/time.h>
 #include <time.h>
+#include <unistd.h>
 #include <sys/un.h>
 #include <ev.h>
 
@@ -1002,9 +1002,9 @@ static struct option options[] = {
     { NULL, 0, 0, 0 }
 };
 
-static void not_blocked(EV_P_ ev_periodic *w, int revents) {
+/* static void not_blocked(EV_P_ ev_periodic *w, int revents) {
     puts(".");
-}
+} */
 
 int main(int argc, char **argv)
 {
