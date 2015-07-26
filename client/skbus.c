@@ -1,7 +1,5 @@
 #include <stdlib.h>
 #include <stdio.h>
-#include <ev.h>
-#include <sys/socket.h>
 #include <sys/un.h>
 #include <errno.h>
 #include <string.h>
@@ -11,6 +9,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <ev.h>
 
 #define MAGIC "magicv1 "
 #define MAGIC_LEN 8

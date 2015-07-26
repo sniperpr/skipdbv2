@@ -1,3 +1,5 @@
+#define _XOPEN_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -13,34 +15,14 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <sys/time.h>
+#include <time.h>
 #include <sys/un.h>
 #include <ev.h>
 
 #include "coroutine.h"
 #include "SkipDB.h"
-
-#define offsetof2(TYPE, MEMBER) ((size_t) &((TYPE *)0)->MEMBER)
-#define container_of(ptr, type, member) ({                      \
-        const typeof( ((type *)0)->member ) *__mptr = (const typeof( ((type *)0)->member )*)(ptr);    \
-        (type *)( (char *)__mptr - offsetof2(type,member) );})
-
-#define MAGIC "magicv1 "
-#define MAGIC_LEN 8
-#define HEADER_LEN 8
-#define HEADER_PREFIX (MAGIC_LEN + HEADER_LEN)
-#define PATH_MAX 128
-#define BUF_MAX 2048
-#define READ_MAX 65536
-
-#define _min(a,b) \
-   ({ __typeof__ (a) _a = (a); \
-       __typeof__ (b) _b = (b); \
-     _a > _b ? _b : _a; })
-
-#define _max(a,b) \
-   ({ __typeof__ (a) _a = (a); \
-       __typeof__ (b) _b = (b); \
-     _a > _b ? _a : _b; })
+#include "skipd.h"
 
 typedef struct _skipd_server {
     ev_io io;
@@ -51,9 +33,9 @@ typedef struct _skipd_server {
     SkipDB *db;
 
     int daemon;
-    char db_path[PATH_MAX];
-    char sock_path[PATH_MAX];
-    char pid_path[PATH_MAX];
+    char db_path[SK_PATH_MAX];
+    char sock_path[SK_PATH_MAX];
+    char pid_path[SK_PATH_MAX];
 } skipd_server;
 
 /* enum skipd_client_state {
@@ -73,8 +55,8 @@ enum ccr_error_code {
     ccr_error_err1 = -1,
     ccr_error_err2 = -2,
     ccr_error_err3 = -3,
-    ccr_error_ok = 0,
-    ccr_error_ok1 = 1,
+    ccr_error_ok = 0, /* 此命令暂时中断，需等待再次执行 */
+    ccr_error_ok1 = 1, /* 此命令成功结束执行 */
     ccr_error_ok2 = 2
 };
 
@@ -107,13 +89,27 @@ typedef struct _skipd_client {
     skipd_server* server;
 } skipd_client;
 
+typedef struct _delay_cmd {
+    ev_timer watcher;
+    char key[DELAY_KEY_LEN + DELAY_PREFIX_LEN];
+    int tick;
+
+    skipd_server* server;
+} delay_cmd;
+
+typedef struct _time_cmd {
+    ev_timer watcher;
+    char key[DELAY_KEY_LEN + DELAY_PREFIX_LEN];
+
+    skipd_server* server;
+} time_cmd;
+
 /* declare */
 extern SkipDBRecord* SkipDB_list_first(SkipDB* self, Datum k, SkipDBCursor** pcur);
 extern SkipDBRecord* SkipDB_list_next(SkipDB* self, Datum k, SkipDBCursor* cursor);
 
 extern int skipd_daemonize(char *_lock_path);
 static int setnonblock(int fd);
-static void not_blocked(EV_P_ ev_periodic *w, int revents);
 static int client_ccr_process(EV_P_ skipd_client* client);
 static int client_ccr_write(EV_P_ skipd_client* client);
 
@@ -121,36 +117,17 @@ char* global_magic = MAGIC;
 skipd_server global_server;
 ev_signal signal_watcher;
 ev_signal signal_watcher2;
+char static_buffer[512];
 
 static void sigint_cb (EV_P_ ev_signal *w, int revents) {
     ev_signal_stop (EV_A_ w);
     ev_break(EV_A_ EVBREAK_ALL);
 }
 
-typedef enum {
-    S2ISUCCESS = 0,
-    S2IOVERFLOW,
-    S2IUNDERFLOW,
-    S2IINCONVERTIBLE
-} STR2INT_ERROR;
-
-STR2INT_ERROR str2int(int *i, char *s, int base) {
-  char *end;
-  long  l;
-  errno = 0;
-  l = strtol(s, &end, base);
-
-  if ((errno == ERANGE && l == LONG_MAX) || l > INT_MAX) {
-    return S2IOVERFLOW;
-  }
-  if ((errno == ERANGE && l == LONG_MIN) || l < INT_MIN) {
-    return S2IUNDERFLOW;
-  }
-  if (*s == '\0' || *end != '\0') {
-    return S2IINCONVERTIBLE;
-  }
-  *i = l;
-  return S2ISUCCESS;
+void sys_script(char *cmd) {
+    snprintf(static_buffer, sizeof(static_buffer), "%s > /tmp/skipd.log 2>&1 &\n", cmd);
+    system(static_buffer);
+    strcpy(static_buffer, ""); // Ensure we don't re-execute it again
 }
 
 static void client_release(EV_P_ skipd_client* client) {
@@ -215,23 +192,85 @@ static void client_write(EV_P_ ev_io *w, int revents) {
     fprintf(stderr, "begin for writing\n");
 
     rt = client_ccr_write(EV_A_ client);
-    if(rt < 0) {
+    if(ccr_break_killed == client->break_level) {
         client_release(EV_A_ client);
-    } else if(0 == rt) {
-        if(ccr_break_killed == client->break_level) {
-            client_release(EV_A_ client);
-        }
     } else {
             // rt > 0, So reset it
             memset(&client->ccr_write, 0, sizeof(struct ccrContextTag));
             client->break_level = 0;
 
-            //change to read state directly
+            //change to read state directly, 
+            //如果read过程还有资源未释放，跳回read进行资源释放
             //event_active(&client->io_read, EV_READ, 0);
             client_read_inner(EV_A_ client, 0);
     }
 
     //TODO void event_active (struct event *ev, int res, short ncalls)
+}
+
+static void delay_cmd_cb(EV_P_ ev_timer* watcher, int revents) {
+    char* p1;
+    int tmpi;
+    delay_cmd* delay_obj = container_of(watcher, delay_cmd, watcher);
+    Datum dkey = Datum_FromCString_(delay_obj->key);
+    Datum dvalue = SkipDB_at_(delay_obj->server->db, dkey);
+    do {
+        if(NULL == dvalue.data) {
+            //TODO log hear, Not exists
+            break;
+        }
+
+        p1 = strstr((char*)dvalue.data, " ");
+        if(NULL == p1) {
+            break;
+        }
+
+        tmpi = (unsigned char*)p1 - dvalue.data;
+        memcpy(static_buffer, dvalue.data, tmpi);
+        static_buffer[tmpi] = '\0';
+        if(S2ISUCCESS != str2int(&tmpi, static_buffer, 10)) {
+            break;
+        }
+
+        p1++;
+        sys_script(p1);
+        if(0 == tmpi) {
+            break;
+        }
+
+        delay_obj->tick = tmpi;
+        watcher->repeat = tmpi;
+        ev_timer_again(EV_A_ watcher);
+        return;
+
+    } while(0);
+
+    ev_timer_stop(EV_A_ watcher);
+    free(delay_obj);
+}
+
+static void time_cmd_cb(EV_P_ ev_timer* watcher, int revents) {
+    char* p1;
+    time_cmd* time_obj = container_of(watcher, time_cmd, watcher);
+    Datum dkey = Datum_FromCString_(time_obj->key);
+    Datum dvalue = SkipDB_at_(time_obj->server->db, dkey);
+    do {
+        if(NULL == dvalue.data) {
+            //TODO log hear, Not exists
+            break;
+        }
+
+        p1 = strstr((char*)dvalue.data, " ");
+        if(NULL == p1) {
+            break;
+        }
+        p1++;
+
+        sys_script(p1);
+    } while(0);
+
+    ev_timer_stop(EV_A_ watcher);
+    free(time_obj);
 }
 
 static int client_send_key(EV_P_ skipd_client* client, char* cmd, char* key, char* buf, int len) {
@@ -291,12 +330,19 @@ static int client_ccr_write(EV_P_ skipd_client* client) {
 
     ccrBegin(ctx);
     while(client->send_pos < client->send_len) {
+        //use send instead of write
         CS->n = write(client->fd, client->send + client->send_pos, client->send_len - client->send_pos);
-        if(CS->n < 0) {
+        //CS->n = send(client->fd, client->send + client->send_pos, client->send_len - client->send_pos, 0);
+        if(CS->n <= 0) {
             if(errno == EINTR || errno == EAGAIN) {
                 ccrReturn(ctx, ccr_error_ok);
             } else {
-                fprintf(stderr, "write sock error, line=%d\n", __LINE__);
+                //TODO fixme
+                client->send_len = 0;
+                client->send_pos = 0;
+                ev_io_stop(EV_A_ &client->io_write);
+                ev_io_start(EV_A_ &client->io_read);
+
                 ccrStop(ctx, ccr_error_err1);
             }
         }
@@ -378,9 +424,15 @@ static int client_ccr_read_util(skipd_client* client, int step_len) {
     ccrFinish(ctx, ccr_error_ok1);
 }
 
-static int client_run_command(EV_P_ skipd_client* client) {
+static int client_run_command(EV_P_ skipd_client* client)
+{
     char *p1, *p2;
+    time_t t1, t2, epoch;
+    int tmpi;
+    struct tm tm1, tm2, *tnow;
     Datum dkey, dvalue;
+    delay_cmd* delay_obj;
+    time_cmd* time_obj;
     struct ccrContextTag* ctx = &client->ccr_read;
 
     //stack
@@ -388,7 +440,7 @@ static int client_run_command(EV_P_ skipd_client* client) {
     int n;
     SkipDBCursor* cursor;
     SkipDBRecord* record;
-    Datum skey
+    Datum skey;
     ccrEndContext(ctx);
 
     ccrBegin(ctx);
@@ -419,7 +471,23 @@ static int client_run_command(EV_P_ skipd_client* client) {
 
         p1 = "ok\n";
         client_send(EV_A_ client, p1, strlen(p1));
-        fprintf(stderr, "resp: %s\n", client->send);
+        ccrReturn(ctx, ccr_error_ok1);
+    } else if(!strcmp(client->command, "ram")) {
+        p1 = p2+1;
+        p2 = strstr(p1, " ");
+        if(NULL == p2) {
+            ccrStop(ctx, ccr_error_err2);
+        }
+        *p2 = '\0';
+        client->key = p1;
+        p1 = p2+1;
+
+        dkey = Datum_FromCString_(client->key);
+        dvalue = Datum_FromData_length_((unsigned char*)p1, client->data_len - (p1 - client->origin));
+        SkipDB_at_put_(client->server->db, dkey, dvalue);
+
+        p1 = "ok\n";
+        client_send(EV_A_ client, p1, strlen(p1));
         ccrReturn(ctx, ccr_error_ok1);
     } else if(!strcmp(client->command, "get")) {
         p1 = p2+1;
@@ -441,6 +509,29 @@ static int client_run_command(EV_P_ skipd_client* client) {
         }
         ccrReturn(ctx, ccr_error_ok1);
     } else if(!strcmp(client->command, "replace")) {
+        p1 = p2+1;
+        p2 = strstr(p1, " ");
+        if(NULL == p2) {
+            ccrStop(ctx, ccr_error_err2);
+        }
+        *p2 = '\0';
+        client->key = p1;
+        p1 = p2+1;
+
+        dkey = Datum_FromCString_(client->key);
+        dvalue = SkipDB_at_(client->server->db, dkey);
+        if(NULL == dvalue.data) {
+            p1 = "none\n";
+            client_send(EV_A_ client, p1, strlen(p1));
+        } else {
+            //exists replace it
+            client_send(EV_A_ client, (char*)dvalue.data, dvalue.size);
+            dvalue = Datum_FromData_length_((unsigned char*)p1, client->data_len - (p1 - client->origin));
+            SkipDB_beginTransaction(client->server->db);
+            SkipDB_at_put_(client->server->db, dkey, dvalue);
+            SkipDB_commitTransaction(client->server->db);
+        }
+        ccrReturn(ctx, ccr_error_ok1);
     } else if(!strcmp(client->command, "list")) {
         p1 = p2+1;
         p2 = strstr(p1, "\n");
@@ -472,14 +563,219 @@ static int client_run_command(EV_P_ skipd_client* client) {
         }
 
         ccrReturn(ctx, ccr_error_ok1);
+    } else if(!strcmp(client->command, "remove")) {
+        p1 = p2+1;
+        p2 = strstr(p1, "\n");
+        if(NULL == p2) {
+            ccrStop(ctx, ccr_error_err2);
+        }
+        *p2 = '\0';
+        client->key = p1;
+        p1 = p2+1;
+
+        dkey = Datum_FromCString_(client->key);
+
+        SkipDB_beginTransaction(client->server->db);
+        SkipDB_removeAt_(client->server->db, dkey);
+        SkipDB_commitTransaction(client->server->db);
+        p1 = "ok\n";
+        client_send(EV_A_ client, p1, strlen(p1));
+        ccrReturn(ctx, ccr_error_ok1);
     } else if(!strcmp(client->command, "delay")) {
+        p1 = p2+1;
+        p2 = strstr(p1, " ");
+        if(NULL == p2) {
+            ccrStop(ctx, ccr_error_err2);
+        }
+        *p2 = '\0';
+        client->key = p1;
+        p1 = p2+1;
+
+        if(strlen(client->key) >= DELAY_KEY_LEN) {
+            p1 = "key too big\n";
+            client_send(EV_A_ client, p1, strlen(p1));
+            ccrReturn(ctx, ccr_error_ok1);
+        }
+
+        dvalue = Datum_FromData_length_((unsigned char*)p1, client->data_len - (p1 - client->origin));
+        dvalue.data[dvalue.size-1] = '\0';
+        //FIXEM hard code hear
+        if(strlen((char*)dvalue.data) >= 300) {
+            p1 = "value too big\n";
+            client_send(EV_A_ client, p1, strlen(p1));
+            ccrReturn(ctx, ccr_error_ok1);
+        }
+
+        p2  = strstr(p1, " ");
+        if(NULL == p2) {
+            p1 = "value param error\n";
+            client_send(EV_A_ client, p1, strlen(p1));
+            ccrReturn(ctx, ccr_error_ok1);
+        }
+        tmpi = (int)(p2 - p1);
+        memcpy(static_buffer, p1, tmpi);
+        static_buffer[tmpi] = '\0';
+        if(S2ISUCCESS != str2int(&tmpi, static_buffer, 10)) {
+            p1 = "delay tick error\n";
+            client_send(EV_A_ client, p1, strlen(p1));
+            ccrReturn(ctx, ccr_error_ok1);
+        }
+
+        //All ok, we create a delay object
+        delay_obj = calloc(1, sizeof(delay_cmd));
+        sprintf(delay_obj->key, "__delay__%s", client->key);
+        client->key = delay_obj->key;
+        delay_obj->tick = tmpi;
+        delay_obj->server = client->server;
+
+        dkey = Datum_FromCString_(client->key);
+        if(SkipDB_exists(client->server->db, dkey)) {
+            p1 = "exists\n";
+            free(delay_obj);
+            client_send(EV_A_ client, p1, strlen(p1));
+
+            //Just replace the old
+            SkipDB_beginTransaction(client->server->db);
+            SkipDB_at_put_(client->server->db, dkey, dvalue);
+            SkipDB_commitTransaction(client->server->db);
+            ccrReturn(ctx, ccr_error_ok1);
+        }
+
+        SkipDB_beginTransaction(client->server->db);
+        SkipDB_at_put_(client->server->db, dkey, dvalue);
+        SkipDB_commitTransaction(client->server->db);
+
+        ev_timer_init(&delay_obj->watcher, delay_cmd_cb, delay_obj->tick, delay_obj->tick);
+        ev_timer_start(EV_A_ &delay_obj->watcher);
+
+        p1 = "delay_ok\n";
+        client_send(EV_A_ client, p1, strlen(p1));
+
+        ccrReturn(ctx, ccr_error_ok1);
     } else if(!strcmp(client->command, "time")) {
+        p1 = p2+1;
+        p2 = strstr(p1, " ");
+        if(NULL == p2) {
+            ccrStop(ctx, ccr_error_err2);
+        }
+        *p2 = '\0';
+        client->key = p1;
+        p1 = p2+1;
+
+        if(strlen(client->key) >= DELAY_KEY_LEN) {
+            p1 = "key too big\n";
+            client_send(EV_A_ client, p1, strlen(p1));
+            ccrReturn(ctx, ccr_error_ok1);
+        }
+
+        p2 = strstr(p1, " ");
+        if(NULL == p2) {
+            p1 = "value error\n";
+            client_send(EV_A_ client, p1, strlen(p1));
+            ccrReturn(ctx, ccr_error_ok1);
+        }
+        tmpi = (int)(p2 - p1);
+        memcpy(static_buffer, p1, tmpi);
+        static_buffer[tmpi] = '\0';
+
+        if (strptime(static_buffer, "%H:%M:%S", &tm1) != NULL) {
+            epoch = mktime(&tm1);
+        } else {
+            p1 = "time error\n";
+            client_send(EV_A_ client, p1, strlen(p1));
+            ccrReturn(ctx, ccr_error_ok1);
+        }
+
+        dvalue = Datum_FromData_length_((unsigned char*)p1, client->data_len - (p1 - client->origin));
+        dvalue.data[dvalue.size-1] = '\0';
+        //FIXEM hard code hear
+        if(strlen((char*)dvalue.data) >= 300) {
+            p1 = "value too big\n";
+            client_send(EV_A_ client, p1, strlen(p1));
+            ccrReturn(ctx, ccr_error_ok1);
+        }
+
+        time_obj = calloc(1, sizeof(time_cmd));
+        sprintf(time_obj->key, "__time__%s", client->key);
+        //TODO time_obj will be free?
+        client->key = time_obj->key;
+        dkey = Datum_FromCString_(client->key);
+        if(SkipDB_exists(client->server->db, dkey)) {
+            p1 = "exists\n";
+            client_send(EV_A_ client, p1, strlen(p1));
+            free(time_obj);
+            ccrReturn(ctx, ccr_error_ok1);
+        }
+
+        SkipDB_beginTransaction(client->server->db);
+        SkipDB_at_put_(client->server->db, dkey, dvalue);
+        SkipDB_commitTransaction(client->server->db);
+
+        t1 = time(NULL);
+        tnow = localtime(&t1);
+        tm2 = *tnow;
+        tm2.tm_sec = tm1.tm_sec;
+        tm2.tm_min = tm1.tm_min;
+        tm2.tm_hour = tm1.tm_hour;
+        t2 = mktime(&tm2);
+        if(t2 <= t1) {
+            p1 = "time already expired\n";
+            client_send(EV_A_ client, p1, strlen(p1));
+            free(time_obj);
+            ccrReturn(ctx, ccr_error_ok1);
+        } else {
+            //Run once
+            time_obj->server = client->server;
+            ev_timer_init(&time_obj->watcher, time_cmd_cb, (t2-t1), 0.);
+            ev_timer_start(EV_A_ &time_obj->watcher);
+
+            p1 = "ok\n";
+            client_send(EV_A_ client, p1, strlen(p1));
+            ccrReturn(ctx, ccr_error_ok1);
+        }
+
+    } else if(!strcmp(client->command, "fire")) {
+        p1 = p2+1;
+        p2 = strstr(p1, "\n");
+        if(NULL == p2) {
+            ccrStop(ctx, ccr_error_err2);
+        }
+        *p2 = '\0';
+        //TODO check length hear
+        client->key = (char*)malloc(DELAY_KEY_LEN);
+        sprintf(client->key, "__event__%s", p1);
+        p1 = p2+1;
+
+        CS->n = 0;
+        CS->skey = Datum_FromCString_(client->key);
+        CS->record = SkipDB_list_first(client->server->db, CS->skey, &CS->cursor);
+        while(NULL != CS->record) {
+            dkey = SkipDBRecord_keyDatum(CS->record);
+            dvalue = SkipDBRecord_valueDatum(CS->record);
+            sys_script((char*)dvalue.data);
+            
+            CS->record = SkipDB_list_next(client->server->db, CS->skey, CS->cursor);
+            CS->n++;
+        }
+
+        //send end
+        p1 = "ok\n";
+        client_send(EV_A_ client, p1, strlen(p1));
+        ccrReturn(ctx, ccr_error_ok);
+
+        if(NULL != CS->cursor) {
+            SkipDBCursor_release(CS->cursor);
+        }
+        free(client->key);
+
+        ccrReturn(ctx, ccr_error_ok1);
     }
 
     ccrFinish(ctx, ccr_error_err2);
 }
 
-static int client_ccr_process(EV_P_ skipd_client* client) {
+static int client_ccr_process(EV_P_ skipd_client* client)
+{
     char* p;
     struct ccrContextTag* ctx = &client->ccr_process;
 
@@ -649,6 +945,7 @@ int unix_socket_init(struct sockaddr_un* socket_un, char* sock_path, int max_que
 
     // Setup a unix socket listener.
     fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    //fd = socketpair(AF_UNIX, SOCK_STREAM, 0);
     if (-1 == fd) {
         perror("echo server socket");
         exit(EXIT_FAILURE);
@@ -656,6 +953,8 @@ int unix_socket_init(struct sockaddr_un* socket_un, char* sock_path, int max_que
 
     //SOL_TCP
     //setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+    //opt = 1;
+    //setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, (void *)&opt, sizeof(int));
 
     // Set it non-blocking
     if (-1 == setnonblock(fd)) {
@@ -703,6 +1002,10 @@ static struct option options[] = {
     { NULL, 0, 0, 0 }
 };
 
+static void not_blocked(EV_P_ ev_periodic *w, int revents) {
+    puts(".");
+}
+
 int main(int argc, char **argv)
 {
     int n = 0, daemon = 0, max_queue = -1;
@@ -740,6 +1043,7 @@ int main(int argc, char **argv)
     }
 
     //kill -SIGUSR1 22459
+    signal(SIGPIPE, SIG_IGN);
     ev_signal_init (&signal_watcher, sigint_cb, SIGINT);
     ev_signal_start (EV_A_ &signal_watcher);
     ev_signal_init (&signal_watcher2, sigint_cb, SIGUSR1);
@@ -749,15 +1053,14 @@ int main(int argc, char **argv)
     server_init(server, max_queue);
 
     // To be sure that we aren't actually blocking
-    ev_periodic_init(&every_few_seconds, not_blocked, 0, 5, 0);
-    ev_periodic_start(EV_A_ &every_few_seconds);
+    //ev_periodic_init(&every_few_seconds, not_blocked, 0, 5, 0);
+    //ev_periodic_start(EV_A_ &every_few_seconds);
 
     // Get notified whenever the socket is ready to read
     ev_io_init(&server->io, server_cb, server->fd, EV_READ);
     ev_io_start(EV_A_ &server->io);
 
     // Run our loop, ostensibly forever
-    puts("unix-socket-echo starting...\n");
     ev_loop(EV_A_ 0);
 
     SkipDB_close(server->db);
@@ -768,6 +1071,3 @@ int main(int argc, char **argv)
     return EXIT_SUCCESS;
 }
 
-static void not_blocked(EV_P_ ev_periodic *w, int revents) {
-    puts("I'm not blocked");
-}

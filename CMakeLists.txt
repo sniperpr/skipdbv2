@@ -47,6 +47,9 @@ ADD_EXECUTABLE(skiplist ./tests/skiplist)
 ADD_EXECUTABLE(skipd ${PROJECT_SOURCE_DIR}/mgr/skipd.c ${PROJECT_SOURCE_DIR}/mgr/daemonize.c)
 TARGET_LINK_LIBRARIES(skipd m skipdb ${LIBEV_LIBRARIES})
 
+ADD_EXECUTABLE(dbus ${PROJECT_SOURCE_DIR}/mgr/dbus.c)
+TARGET_LINK_LIBRARIES(dbus ${LIBEV_LIBRARIES})
+
 ADD_EXECUTABLE(server ${PROJECT_SOURCE_DIR}/mgr/array-heap.c ${PROJECT_SOURCE_DIR}/mgr/unix-echo-server.c)
 ADD_EXECUTABLE(client ${PROJECT_SOURCE_DIR}/mgr/array-heap.c ${PROJECT_SOURCE_DIR}/mgr/unix-echo-client.c)
 TARGET_LINK_LIBRARIES(server m skipdb ${LIBEV_LIBRARIES})

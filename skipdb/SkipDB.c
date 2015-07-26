@@ -807,6 +807,15 @@ void SkipDB_mergeInto_(SkipDB *self, SkipDB *other)
 	}
 }
 
+int SkipDB_exists(SkipDB *self, Datum key) {
+    Datum dvalue = SkipDB_at_(self, key); 
+    if(NULL == dvalue.data) {
+        return 0;
+    } else {
+        return 1;
+    }
+}
+
 void SkipDB_list_prefix(SkipDB* self, Datum k, void* ctx, skipdb_list_callback callback)
 {
     Datum t;
