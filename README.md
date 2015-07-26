@@ -19,5 +19,5 @@ rewrite and fix for https://github.com/stevedekorte/skipdb
 * make
 
 # 执行方法
-skipd -d /path/of/data
-dbus command params
+* skipd -d /path/of/data
+* dbus command params
