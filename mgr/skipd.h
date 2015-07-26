@@ -18,6 +18,8 @@
 #define DELAY_PREFIX_LEN 9
 #define DELAY_KEY_LEN 128
 
+#define SKIPD_DEBUG 3
+
 #define _min(a,b) \
    ({ __typeof__ (a) _a = (a); \
        __typeof__ (b) _b = (b); \

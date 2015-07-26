@@ -18,6 +18,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <sys/un.h>
+#include <syslog.h>
 #include <ev.h>
 
 #include "coroutine.h"
@@ -130,8 +131,40 @@ void sys_script(char *cmd) {
     strcpy(static_buffer, ""); // Ensure we don't re-execute it again
 }
 
+int log_level = LOG_DEBUG;
+void emit_log(int level, char* line) {
+    //TODO for level
+    int syslog_level = LOG_DEBUG;
+    //syslog(syslog_level, "%s", line);
+    printf("%s", line);
+}
+
+void _skipd_logv(int filter, const char *format, va_list vl)
+{
+	char buf[256];
+
+        //TODO for log_evel
+	/* if (!(log_level & filter)) {
+	    return;
+        } */
+
+	vsnprintf(buf, sizeof(buf), format, vl);
+	buf[sizeof(buf) - 1] = '\0';
+
+	emit_log(filter, buf);
+}
+
+void skipd_log(int filter, const char *format, ...)
+{
+	va_list ap;
+
+	va_start(ap, format);
+	_skipd_logv(filter, format, ap);
+	va_end(ap);
+}
+
 static void client_release(EV_P_ skipd_client* client) {
-    fprintf(stderr, "closing client\n");
+    skipd_log(SKIPD_DEBUG, "closing client\n");
 
     ev_io_stop(EV_A_ &client->io_read);
     ev_io_stop(EV_A_ &client->io_write);
@@ -155,7 +188,7 @@ static void client_read_inner(EV_P_ skipd_client* client, int revents) {
     assert(client->break_level == 0);
 
     rt = client_ccr_process(EV_A_ client);
-    fprintf(stderr, "process:%d\n", rt);
+    skipd_log(SKIPD_DEBUG, "process:%d\n", rt);
     if(ccr_error_err1 == rt) {
         //Close it directly
         client_release(EV_A_ client);
@@ -189,7 +222,7 @@ static void client_write(EV_P_ ev_io *w, int revents) {
     skipd_client* client = container_of(w, skipd_client, io_write);
     int rt;
 
-    fprintf(stderr, "begin for writing\n");
+    skipd_log(SKIPD_DEBUG, "begin for writing\n");
 
     rt = client_ccr_write(EV_A_ client);
     if(ccr_break_killed == client->break_level) {
@@ -904,8 +937,6 @@ static skipd_client* client_new(int fd) {
 
 // This callback is called when data is readable on the unix socket.
 static void server_cb(EV_P_ ev_io *w, int revents) {
-    puts("unix stream socket has become readable");
-
     int client_fd;
     skipd_client* client;
 
@@ -915,13 +946,13 @@ static void server_cb(EV_P_ ev_io *w, int revents) {
         client_fd = accept(server->fd, NULL, NULL);
         if( client_fd == -1 ) {
             if( errno != EAGAIN && errno != EWOULDBLOCK ) {
-                fprintf(stderr, "accept() failed errno=%i (%s)",  errno, strerror(errno));
+                skipd_log(SKIPD_DEBUG, "accept() failed errno=%i (%s)",  errno, strerror(errno));
                 exit(EXIT_FAILURE);
             }
             break;
         }
 
-        puts("accepted a client");
+        skipd_log(SKIPD_DEBUG, "accepted a client\n");
         client = client_new(client_fd);
         client->server = server;
         ev_io_start(EV_A_ &client->io_read);
@@ -1006,11 +1037,117 @@ static struct option options[] = {
     puts(".");
 } */
 
+static void server_init_delay(EV_P_ skipd_server *server) {
+    int n1, n2;
+    char *p1;
+    Datum skey, dkey, dvalue;
+    SkipDBCursor* cursor = NULL;
+    SkipDBRecord* record;
+    delay_cmd* delay_obj;
+
+    //Init hear
+    skey = Datum_FromCString_("__delay__");
+    record = SkipDB_list_first(server->db, skey, &cursor);
+    while(NULL != record) {
+        dkey = SkipDBRecord_keyDatum(record);
+        dvalue = SkipDBRecord_valueDatum(record);
+
+        p1 = strstr((char*)dvalue.data, " "); 
+        if(NULL != p1) {
+            n1 = (p1 - (char*)dvalue.data);
+            memcpy(static_buffer, dvalue.data, n1);
+            static_buffer[n1] = '\0';
+            if(S2ISUCCESS == str2int(&n1, static_buffer, 10)) {
+                delay_obj = (delay_cmd*)malloc(sizeof(delay_cmd));
+                memcpy(delay_obj->key, dkey.data, dkey.size);
+                delay_obj->key[dkey.size] = '\0';
+                delay_obj->tick = n1;
+                delay_obj->server = server;
+
+                ev_timer_init(&delay_obj->watcher, delay_cmd_cb, delay_obj->tick, delay_obj->tick);
+                ev_timer_start(EV_A_ &delay_obj->watcher);
+            }
+        }
+
+        record = SkipDB_list_next(server->db, skey, cursor);
+    }
+
+    if(NULL != cursor) {
+        SkipDBCursor_release(cursor);
+    }
+}
+
+static void server_init_time(EV_P_ skipd_server *server) {
+    int n1, n2;
+    char *p1;
+    Datum skey, dkey, dvalue;
+    SkipDBCursor* cursor = NULL;
+    SkipDBRecord* record;
+    time_cmd* time_obj;
+    time_t t1, t2;
+    struct tm tm1, tm2, *tnow;
+
+    //Init hear
+    skey = Datum_FromCString_("__time__");
+    record = SkipDB_list_first(server->db, skey, &cursor);
+    while(NULL != record) {
+        dkey = SkipDBRecord_keyDatum(record);
+        dvalue = SkipDBRecord_valueDatum(record);
+
+        p1 = strstr((char*)dvalue.data, " "); 
+        if(NULL != p1) {
+            n1 = (p1 - (char*)dvalue.data);
+            memcpy(static_buffer, dvalue.data, n1);
+            static_buffer[n1] = '\0';
+
+            if (strptime(static_buffer, "%H:%M:%S", &tm1) != NULL) {
+                t1 = time(NULL);
+                tnow = localtime(&t1);
+                tm2 = *tnow;
+                tm2.tm_sec = tm1.tm_sec;
+                tm2.tm_min = tm1.tm_min;
+                tm2.tm_hour = tm1.tm_hour;
+                t2 = mktime(&tm2);
+
+                if(t2 > t1) {
+                    time_obj = (delay_cmd*)malloc(sizeof(time_cmd));
+                    memcpy(time_obj->key, dkey.data, dkey.size);
+                    time_obj->key[dkey.size] = '\0';
+                    time_obj->server = server;
+
+                    ev_timer_init(&time_obj->watcher, time_cmd_cb, (t2-t1), 0.0);
+                    ev_timer_start(EV_A_ &time_obj->watcher);
+                } else {
+                    //TODO fixme, 隔一天
+                    ;
+                }
+            }
+        }
+
+        record = SkipDB_list_next(server->db, skey, cursor);
+    }
+
+    if(NULL != cursor) {
+        SkipDBCursor_release(cursor);
+    }
+}
+
+static void server_cmd_init(EV_P_ ev_timer *w, int revents) {
+    skipd_server *server = &global_server;
+
+    //Stop first
+    ev_timer_stop(EV_A_ w);
+
+    server_init_delay(EV_A_ server);
+    server_init_time(EV_A_ server);
+}
+
 int main(int argc, char **argv)
 {
     int n = 0, daemon = 0, max_queue = -1;
     skipd_server *server = &global_server;
-    struct ev_periodic every_few_seconds;
+    //struct ev_periodic every_few_seconds;
+    ev_timer init_watcher = {0};
     EV_P  = ev_default_loop(0);
 
     strcpy(server->sock_path, "/tmp/.skipd_server_sock");
@@ -1052,13 +1189,15 @@ int main(int argc, char **argv)
     // Create unix socket in non-blocking fashion
     server_init(server, max_queue);
 
-    // To be sure that we aren't actually blocking
-    //ev_periodic_init(&every_few_seconds, not_blocked, 0, 5, 0);
-    //ev_periodic_start(EV_A_ &every_few_seconds);
-
     // Get notified whenever the socket is ready to read
     ev_io_init(&server->io, server_cb, server->fd, EV_READ);
     ev_io_start(EV_A_ &server->io);
+
+    // To be sure that we aren't actually blocking
+    //ev_periodic_init(&every_few_seconds, not_blocked, 0, 5, 0);
+    //ev_periodic_start(EV_A_ &every_few_seconds);
+    ev_timer_init(EV_A_ &init_watcher, server_cmd_init, 5.0, 0.0);
+    ev_timer_start(EV_A_ &init_watcher);
 
     // Run our loop, ostensibly forever
     ev_loop(EV_A_ 0);

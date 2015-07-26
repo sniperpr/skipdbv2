@@ -30,7 +30,8 @@ extern "C" {
 
 // if prob. dist = 0.5, then max level 32 is enough for 2^32 records
 
-#define SKIPDB_MAX_LEVEL 32
+//#define SKIPDB_MAX_LEVEL 32
+#define SKIPDB_MAX_LEVEL 16
 #define SKIPDB_PROBABILITY_DISTRIBUTION 0.5
 
 typedef void (SkipDBObjectMarkFunc)(void *);
