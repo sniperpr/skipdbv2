@@ -109,13 +109,13 @@ typedef struct _time_cmd {
 extern SkipDBRecord* SkipDB_list_first(SkipDB* self, Datum k, SkipDBCursor** pcur);
 extern SkipDBRecord* SkipDB_list_next(SkipDB* self, Datum k, SkipDBCursor* cursor);
 
-extern int skipd_daemonize(char *_lock_path);
+extern void skipd_daemonize(char *_lock_path);
 static int setnonblock(int fd);
 static int client_ccr_process(EV_P_ skipd_client* client);
 static int client_ccr_write(EV_P_ skipd_client* client);
 
 char* global_magic = MAGIC;
-skipd_server global_server;
+skipd_server* global_server;
 ev_signal signal_watcher;
 ev_signal signal_watcher2;
 char static_buffer[512];
@@ -135,8 +135,8 @@ int log_level = LOG_DEBUG;
 void emit_log(int level, char* line) {
     //TODO for level
     int syslog_level = LOG_DEBUG;
-    //syslog(syslog_level, "%s", line);
-    printf("%s", line);
+    syslog(syslog_level, "%s", line);
+    //printf("%s", line);
 }
 
 void _skipd_logv(int filter, const char *format, va_list vl)
@@ -289,21 +289,25 @@ static void time_cmd_cb(EV_P_ ev_timer* watcher, int revents) {
     Datum dvalue = SkipDB_at_(time_obj->server->db, dkey);
     do {
         if(NULL == dvalue.data) {
-            //TODO log hear, Not exists
+            skipd_log(SKIPD_DEBUG, "time %s not found\n", dkey.data);
+            ev_timer_stop(EV_A_ watcher);
+            free(time_obj);
             break;
         }
 
         p1 = strstr((char*)dvalue.data, " ");
         if(NULL == p1) {
+            skipd_log(SKIPD_DEBUG, "time %s value error\n", dkey.data);
+            ev_timer_stop(EV_A_ watcher);
+            free(time_obj);
             break;
         }
         p1++;
 
         sys_script(p1);
+        ev_timer_again(EV_A_ watcher);
     } while(0);
 
-    ev_timer_stop(EV_A_ watcher);
-    free(time_obj);
 }
 
 static int client_send_key(EV_P_ skipd_client* client, char* cmd, char* key, char* buf, int len) {
@@ -751,21 +755,17 @@ static int client_run_command(EV_P_ skipd_client* client)
         tm2.tm_min = tm1.tm_min;
         tm2.tm_hour = tm1.tm_hour;
         t2 = mktime(&tm2);
+        time_obj->server = client->server;
         if(t2 <= t1) {
-            p1 = "time already expired\n";
-            client_send(EV_A_ client, p1, strlen(p1));
-            free(time_obj);
-            ccrReturn(ctx, ccr_error_ok1);
-        } else {
-            //Run once
-            time_obj->server = client->server;
-            ev_timer_init(&time_obj->watcher, time_cmd_cb, (t2-t1), 0.);
+            ev_timer_init(&time_obj->watcher, time_cmd_cb, (t1-t2+24*3600), 24*3600);
             ev_timer_start(EV_A_ &time_obj->watcher);
-
-            p1 = "ok\n";
-            client_send(EV_A_ client, p1, strlen(p1));
-            ccrReturn(ctx, ccr_error_ok1);
+        } else {
+            ev_timer_init(&time_obj->watcher, time_cmd_cb, (t2-t1), 24*3600);
+            ev_timer_start(EV_A_ &time_obj->watcher);
         }
+        p1 = "ok\n";
+        client_send(EV_A_ client, p1, strlen(p1));
+        ccrReturn(ctx, ccr_error_ok1);
 
     } else if(!strcmp(client->command, "fire")) {
         p1 = p2+1;
@@ -1005,10 +1005,11 @@ int server_init(skipd_server* server, int max_queue) {
 
     server->db = SkipDB_new();
     SkipDB_setPath_(server->db, server->db_path);
+    //syslog(LOG_PERROR, "LOG HEAR:%s\n", server->db_path);
     SkipDB_open(server->db);
 
     count = SkipDB_count(server->db);
-    fprintf(stderr, "count=%d\n", count);
+    skipd_log(SKIPD_DEBUG, "Load count=%d\n", count);
 
     server->fd = unix_socket_init(&server->socket, server->sock_path, max_queue);
     server->socket_len = sizeof(server->socket.sun_family) + strlen(server->socket.sun_path);
@@ -1115,11 +1116,11 @@ static void server_init_time(EV_P_ skipd_server *server) {
                     time_obj->key[dkey.size] = '\0';
                     time_obj->server = server;
 
-                    ev_timer_init(&time_obj->watcher, time_cmd_cb, (t2-t1), 0.0);
+                    ev_timer_init(&time_obj->watcher, time_cmd_cb, (t2-t1), 24*3600);
                     ev_timer_start(EV_A_ &time_obj->watcher);
                 } else {
-                    //TODO fixme, 隔一天
-                    ;
+                    ev_timer_init(&time_obj->watcher, time_cmd_cb, (t1-t2+24*3600), 24*3600);
+                    ev_timer_start(EV_A_ &time_obj->watcher);
                 }
             }
         }
@@ -1133,7 +1134,7 @@ static void server_init_time(EV_P_ skipd_server *server) {
 }
 
 static void server_cmd_init(EV_P_ ev_timer *w, int revents) {
-    skipd_server *server = &global_server;
+    skipd_server *server = global_server;
 
     //Stop first
     ev_timer_stop(EV_A_ w);
@@ -1145,10 +1146,14 @@ static void server_cmd_init(EV_P_ ev_timer *w, int revents) {
 int main(int argc, char **argv)
 {
     int n = 0, daemon = 0, max_queue = -1;
-    skipd_server *server = &global_server;
+    int syslog_options = LOG_PID | LOG_PERROR | LOG_DEBUG;
+    skipd_server *server;
     //struct ev_periodic every_few_seconds;
     ev_timer init_watcher = {0};
     EV_P  = ev_default_loop(0);
+
+    global_server = (skipd_server*)malloc(sizeof(skipd_server));
+    server = global_server;
 
     strcpy(server->sock_path, "/tmp/.skipd_server_sock");
     while (n >= 0) {
@@ -1174,16 +1179,20 @@ int main(int argc, char **argv)
             }
     }
 
-    if(daemon && skipd_daemonize(server->pid_path)) {
-        fprintf(stderr, "Failed to daemonize\n");
-        return 1;
+    fprintf(stderr, "path is %s\n", server->pid_path);
+    if(daemon) {
+        skipd_daemonize(server->pid_path);
     }
 
-    //kill -SIGUSR1 22459
+    setlogmask(LOG_UPTO (LOG_DEBUG));
+    openlog("skipd", syslog_options, LOG_DAEMON);
+
+    //kill -SIGUSR2 22459
     signal(SIGPIPE, SIG_IGN);
+    signal(SIGABRT, SIG_IGN);
     ev_signal_init (&signal_watcher, sigint_cb, SIGINT);
     ev_signal_start (EV_A_ &signal_watcher);
-    ev_signal_init (&signal_watcher2, sigint_cb, SIGUSR1);
+    ev_signal_init (&signal_watcher2, sigint_cb, SIGUSR2);
     ev_signal_start (EV_A_ &signal_watcher2);
 
     // Create unix socket in non-blocking fashion
@@ -1199,11 +1208,12 @@ int main(int argc, char **argv)
     ev_timer_init(EV_A_ &init_watcher, server_cmd_init, 5.0, 0.0);
     ev_timer_start(EV_A_ &init_watcher);
 
+
     // Run our loop, ostensibly forever
     ev_loop(EV_A_ 0);
 
     SkipDB_close(server->db);
-    fprintf(stderr, "exit..\n");
+    skipd_log(SKIPD_DEBUG, "exit..\n");
 
     // This point is only ever reached if the loop is manually exited
     close(server->fd);
