@@ -12,11 +12,11 @@ rewrite and fix for https://github.com/stevedekorte/skipdb
 * dbus time key H:M:S path_of_shell.sh
 
 # 编译方法
-cd skipdb
-mkdir build
-cd build
-cmake ..
-make
+* cd skipdb
+* mkdir build
+* cd build
+* cmake ..
+* make
 
 # 执行方法
 skipd -d /path/of/data
