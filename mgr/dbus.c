@@ -140,7 +140,13 @@ int parse_common_result(dbclient *client) {
         }
 
         client->buf[n2] = '\0';
-        printf("%s", client->buf);
+
+        if(client->buf[n2-1] != '\n') {
+            //TODO fix hear
+            printf("%s\n", client->buf);
+        } else {
+            printf("%s", client->buf);
+        }
     } while(0);
 
     return 0;
@@ -182,7 +188,12 @@ int parse_list_result(dbclient *client) {
         if(NULL != strstr(client->buf, "__end__")) {
             break;
         }
-        printf("%s", client->buf);
+        if(client->buf[n2-1] != '\n') {
+            //TODO fix hear
+            printf("%s\n", client->buf);
+        } else {
+            printf("%s", client->buf);
+        }
     }
 
     return 0;
