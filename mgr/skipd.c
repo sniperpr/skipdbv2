@@ -109,7 +109,7 @@ typedef struct _time_cmd {
 extern SkipDBRecord* SkipDB_list_first(SkipDB* self, Datum k, SkipDBCursor** pcur);
 extern SkipDBRecord* SkipDB_list_next(SkipDB* self, Datum k, SkipDBCursor* cursor);
 
-extern void skipd_daemonize(char *_lock_path);
+extern int skipd_daemonize(char *_lock_path);
 static int setnonblock(int fd);
 static int client_ccr_process(EV_P_ skipd_client* client);
 static int client_ccr_write(EV_P_ skipd_client* client);
@@ -1179,9 +1179,9 @@ int main(int argc, char **argv)
             }
     }
 
-    fprintf(stderr, "path is %s\n", server->pid_path);
-    if(daemon) {
-        skipd_daemonize(server->pid_path);
+    if(daemon && skipd_daemonize(server->pid_path)) {
+        fprintf(stderr, "Failed to daemonize\n");
+        return 1;
     }
 
     setlogmask(LOG_UPTO (LOG_DEBUG));
