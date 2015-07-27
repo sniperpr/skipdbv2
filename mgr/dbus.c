@@ -199,6 +199,88 @@ int parse_list_result(dbclient *client) {
     return 0;
 }
 
+int parse_script_result(dbclient *client) {
+    int n1, n2;
+    char *p1, *p2;
+    char* magic = MAGIC;
+
+    for(;;) {
+        client->timeout = time(NULL) + 110;
+
+        client->buf_pos = 0;
+        n1 = read_util(client, HEADER_PREFIX);
+        if(n1 < 0) {
+            return n1;
+        }
+
+        if(0 != memcmp(client->buf, magic, MAGIC_LEN)) {
+            //message error
+            return -3;
+        }
+
+        client->buf[HEADER_PREFIX-1] = '\0';
+        if(S2ISUCCESS != str2int(&n2, client->buf+MAGIC_LEN, 10)) {
+            //message error
+            return -4;
+        }
+
+        client->buf_pos = 0;
+        client->timeout = time(NULL) + 510;
+        n1 = read_util(client, n2);
+        if(n1 < 0) {
+            return n1;
+        }
+
+        client->buf[n2] = '\0';
+        if(NULL != strstr(client->buf, "__end__")) {
+            break;
+        }
+
+        p1 = client->buf + 5;
+        p2 = strstr(p1, " ");
+        *p2 = '\0';
+        p2++;
+        if(client->buf[n2-1] == '\n') {
+            client->buf[n2-1] = '\0';
+        } 
+        printf("export %s=%s;", p1, p2);
+    }
+
+    return 0;
+}
+
+static void update_key(dbclient* client, char* prefix, char* envp[]) {
+    char** env;
+    char *p1, *p2;
+    int n1, n2, nenv, nc, nkey, np = strlen(prefix);
+
+    strcpy(client->command, "replace");
+    nc = strlen(client->command);
+    for (env = envp; *env != 0; env++) {
+        p1 = *env;
+        //if(strncmp(p1, prefix, np)) {
+        //    continue;
+        //}
+
+        nenv = strlen(p1);
+        n1 = nc + nenv + 2;
+        check_buf(client, n1 + HEADER_PREFIX);
+
+        n2 = sprintf(client->buf, "%s%07d %s ", MAGIC, n1, client->command);
+        
+        p2 = strstr(p1, "=");
+        nkey = (p2-p1);
+        memcpy(client->buf+n2, p1, nkey);
+        p2++;
+        client->buf[n2+nkey] = ' ';
+        strcpy(client->buf+n2+nkey+1, p2);
+
+        client->buf[n1+HEADER_PREFIX] = '\0';
+        client->buf[n1+HEADER_PREFIX-1] = '\n';
+        write(client->remote_fd, client->buf, n1 + HEADER_PREFIX);
+    }
+}
+
 static void help() {
     printf("help:\n");
     printf("dbus set key value\n");
@@ -208,10 +290,12 @@ static void help() {
     printf("dbus list key\n");
     printf("dbus delay key tick path_of_shell.sh\n");
     printf("dbus time key H:M:S path_of_shell.sh\n");
+    printf("dbus export key\n");
+    printf("dbus update key\n");
 }
 
 dbclient* gclient;
-int main(int argc, char **argv)
+int main(int argc, char **argv, char * envp[])
 { 
     int n1, n2, err = 0;
     struct tm tm1;
@@ -242,6 +326,21 @@ int main(int argc, char **argv)
 
             setnonblock(remote_fd);
             n1 = parse_list_result(gclient);
+        } else if(!strcmp("export", argv[1])) {
+            strcpy(client->command, "list");
+            n1 = strlen(argv[2]) + 2 + strlen(client->command);
+            check_buf(client, n1 + HEADER_PREFIX);
+            n2 = snprintf(client->buf, client->buf_max, "%s%07d %s %s\n", MAGIC, n1, client->command, argv[2]);
+            write(remote_fd, client->buf, n2);
+
+            setnonblock(remote_fd);
+            n1 = parse_script_result(gclient);
+        } else if(!strcmp("update", argv[1])) {
+            if(argc < 3) {
+                err = -13;
+                break;
+            }
+            update_key(gclient, argv[2], envp);
         } else if(!strcmp("get", argv[1])) {
             if(argc < 3) {
                 err = -13;
