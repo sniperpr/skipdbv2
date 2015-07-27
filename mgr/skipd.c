@@ -232,7 +232,7 @@ static void client_write(EV_P_ ev_io *w, int revents) {
             memset(&client->ccr_write, 0, sizeof(struct ccrContextTag));
             client->break_level = 0;
 
-            //change to read state directly, 
+            //change to read state directly,
             //如果read过程还有资源未释放，跳回read进行资源释放
             //event_active(&client->io_read, EV_READ, 0);
             client_read_inner(EV_A_ client, 0);
@@ -311,7 +311,7 @@ static void time_cmd_cb(EV_P_ ev_timer* watcher, int revents) {
 }
 
 static int client_send_key(EV_P_ skipd_client* client, char* cmd, char* key, char* buf, int len) {
-    char pref_buf[HEADER_PREFIX];
+    char pref_buf[HEADER_PREFIX+1];
     int n, resp_len = (len + 2);
 
     memcpy(pref_buf, global_magic, MAGIC_LEN);
@@ -786,7 +786,7 @@ static int client_run_command(EV_P_ skipd_client* client)
             dkey = SkipDBRecord_keyDatum(CS->record);
             dvalue = SkipDBRecord_valueDatum(CS->record);
             sys_script((char*)dvalue.data);
-            
+
             CS->record = SkipDB_list_next(client->server->db, CS->skey, CS->cursor);
             CS->n++;
         }
@@ -1053,7 +1053,7 @@ static void server_init_delay(EV_P_ skipd_server *server) {
         dkey = SkipDBRecord_keyDatum(record);
         dvalue = SkipDBRecord_valueDatum(record);
 
-        p1 = strstr((char*)dvalue.data, " "); 
+        p1 = strstr((char*)dvalue.data, " ");
         if(NULL != p1) {
             n1 = (p1 - (char*)dvalue.data);
             memcpy(static_buffer, dvalue.data, n1);
@@ -1095,7 +1095,7 @@ static void server_init_time(EV_P_ skipd_server *server) {
         dkey = SkipDBRecord_keyDatum(record);
         dvalue = SkipDBRecord_valueDatum(record);
 
-        p1 = strstr((char*)dvalue.data, " "); 
+        p1 = strstr((char*)dvalue.data, " ");
         if(NULL != p1) {
             n1 = (p1 - (char*)dvalue.data);
             memcpy(static_buffer, dvalue.data, n1);
