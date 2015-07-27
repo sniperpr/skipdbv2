@@ -258,9 +258,9 @@ static void update_key(dbclient* client, char* prefix, char* envp[]) {
     nc = strlen(client->command);
     for (env = envp; *env != 0; env++) {
         p1 = *env;
-        //if(strncmp(p1, prefix, np)) {
-        //    continue;
-        //}
+        if(strncmp(p1, prefix, np)) {
+            continue;
+        }
 
         nenv = strlen(p1);
         n1 = nc + nenv + 2;
