@@ -12,6 +12,7 @@ rewrite and fix for https://github.com/stevedekorte/skipdb
 * dbus time key H:M:S path_of_shell.sh
 
 # 编译方法
+* 依赖库 libev，需要自行编译或安装
 * cd skipdb
 * mkdir build
 * cd build
