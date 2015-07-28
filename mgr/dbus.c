@@ -242,7 +242,7 @@ int parse_script_result(dbclient *client) {
         p2++;
         if(client->buf[n2-1] == '\n') {
             client->buf[n2-1] = '\0';
-        } 
+        }
         printf("export %s=%s;", p1, p2);
     }
 
@@ -267,7 +267,7 @@ static void update_key(dbclient* client, char* prefix, char* envp[]) {
         check_buf(client, n1 + HEADER_PREFIX);
 
         n2 = sprintf(client->buf, "%s%07d %s ", MAGIC, n1, client->command);
-        
+
         p2 = strstr(p1, "=");
         nkey = (p2-p1);
         memcpy(client->buf+n2, p1, nkey);
@@ -294,9 +294,34 @@ static void help() {
     printf("dbus update key\n");
 }
 
+static int prefix_set_command(dbclient* client, int argc, char **argv)
+{
+    int i, n1, n2;
+    n1 = strlen(client->command) + argc - 1;
+    for(i = 2; i < argc; i++) {
+        n1 += strlen(argv[i]);
+    }
+    //n1 = strlen(client->command) + strlen(argv[2]) + strlen(argv[3]) + 3;
+    check_buf(client, n1 + HEADER_PREFIX);
+    //n2 = snprintf(client->buf, client->buf_max, "%s%07d %s %s %s\n", MAGIC, n1, client->command, argv[2], argv[3]);
+    n2 = snprintf(client->buf, client->buf_max, "%s%07d %s ", MAGIC, n1, client->command);
+    for(i = 2; i < argc; i++) {
+        strcpy(client->buf+n2, argv[i]);
+        n2 += strlen(argv[i]);
+        if(i == (argc-1)) {
+            client->buf[n2] = '\n';
+        } else {
+            client->buf[n2] = ' ';
+        }
+        n2++;
+    }
+
+    return n2;
+}
+
 dbclient* gclient;
 int main(int argc, char **argv, char * envp[])
-{ 
+{
     int n1, n2, err = 0;
     struct tm tm1;
     dbclient* client;
@@ -386,9 +411,7 @@ int main(int argc, char **argv, char * envp[])
                 break;
             }
             strcpy(client->command, argv[1]);
-            n1 = strlen(client->command) + strlen(argv[2]) + strlen(argv[3]) + 3;
-            check_buf(client, n1 + HEADER_PREFIX);
-            n2 = snprintf(client->buf, client->buf_max, "%s%07d %s %s %s\n", MAGIC, n1, client->command, argv[2], argv[3]);
+            n2 = prefix_set_command(client, argc, argv);
             write(remote_fd, client->buf, n2);
 
             setnonblock(remote_fd);
@@ -399,9 +422,7 @@ int main(int argc, char **argv, char * envp[])
                 break;
             }
             strcpy(client->command, argv[1]);
-            n1 = strlen(client->command) + strlen(argv[2]) + strlen(argv[3]) + 3;
-            check_buf(client, n1 + HEADER_PREFIX);
-            n2 = snprintf(client->buf, client->buf_max, "%s%07d %s %s %s\n", MAGIC, n1, client->command, argv[2], argv[3]);
+            n2 = prefix_set_command(client, argc, argv);
             write(remote_fd, client->buf, n2);
 
             setnonblock(remote_fd);
@@ -412,14 +433,16 @@ int main(int argc, char **argv, char * envp[])
                 break;
             }
             strcpy(client->command, argv[1]);
-            n1 = strlen(client->command) + strlen(argv[2]) + strlen(argv[3]) + 3;
-            check_buf(client, n1 + HEADER_PREFIX);
-            n2 = snprintf(client->buf, client->buf_max, "%s%07d %s %s %s\n", MAGIC, n1, client->command, argv[2], argv[3]);
+            n2 = prefix_set_command(client, argc, argv);
             write(remote_fd, client->buf, n2);
 
             setnonblock(remote_fd);
             n1 = parse_common_result(client);
         } else if(!strcmp("event", argv[1])) {
+            if(argc < 4) {
+                err = -18;
+                break;
+            }
             strcpy(client->command, "set");
             n1 = strlen(client->command) + strlen(argv[2]) + strlen(argv[3]) + 3 + 9;
             check_buf(client, n1 + HEADER_PREFIX);
