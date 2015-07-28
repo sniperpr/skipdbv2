@@ -528,11 +528,6 @@ static int client_run_command(EV_P_ skipd_client* client)
         ccrReturn(ctx, ccr_error_ok1);
     } else if(!strcmp(client->command, "get")) {
         p1 = p2+1;
-        p2 = strstr(p1, "\n");
-        if(NULL == p2) {
-            ccrStop(ctx, ccr_error_err2);
-        }
-        *p2 = '\0';
         client->key = p1;
         p1 = p2+1;
 
@@ -571,11 +566,6 @@ static int client_run_command(EV_P_ skipd_client* client)
         ccrReturn(ctx, ccr_error_ok1);
     } else if(!strcmp(client->command, "list")) {
         p1 = p2+1;
-        p2 = strstr(p1, "\n");
-        if(NULL == p2) {
-            ccrStop(ctx, ccr_error_err2);
-        }
-        *p2 = '\0';
         client->key = p1;
         p1 = p2+1;
 
@@ -602,11 +592,6 @@ static int client_run_command(EV_P_ skipd_client* client)
         ccrReturn(ctx, ccr_error_ok1);
     } else if(!strcmp(client->command, "remove")) {
         p1 = p2+1;
-        p2 = strstr(p1, "\n");
-        if(NULL == p2) {
-            ccrStop(ctx, ccr_error_err2);
-        }
-        *p2 = '\0';
         client->key = p1;
         p1 = p2+1;
 
@@ -769,11 +754,6 @@ static int client_run_command(EV_P_ skipd_client* client)
 
     } else if(!strcmp(client->command, "fire")) {
         p1 = p2+1;
-        p2 = strstr(p1, "\n");
-        if(NULL == p2) {
-            ccrStop(ctx, ccr_error_err2);
-        }
-        *p2 = '\0';
         //TODO check length hear
         client->key = (char*)malloc(DELAY_KEY_LEN);
         sprintf(client->key, "__event__%s", p1);
