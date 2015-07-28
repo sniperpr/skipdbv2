@@ -210,7 +210,7 @@ int parse_get_result(dbclient *client) {
 
 int parse_list_result(dbclient *client) {
     int n1, n2;
-    char *p2, *magic = MAGIC;
+    char *p1, *p2, *magic = MAGIC;
 
     for(;;) {
         client->timeout = time(NULL) + 110;
@@ -245,6 +245,8 @@ int parse_list_result(dbclient *client) {
             break;
         }
         p2 = client->buf;
+        p1 = strstr(p2, " ");
+        *p1 = '=';
         if(p2[n2-1] != '\n') {
             printf("%s\n", p2);
         } else {
