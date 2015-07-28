@@ -42,7 +42,7 @@ TARGET_LINK_LIBRARIES(udbtest skipdb m ${LIBEV_LIBRARIES})
 ADD_EXECUTABLE(example ./tests/example.c)
 TARGET_LINK_LIBRARIES(example skipdb m ${LIBEV_LIBRARIES})
 
-ADD_EXECUTABLE(skiplist ./tests/skiplist)
+#ADD_EXECUTABLE(skiplist ./tests/skiplist)
 
 ADD_EXECUTABLE(skipd ${PROJECT_SOURCE_DIR}/mgr/skipd.c ${PROJECT_SOURCE_DIR}/mgr/daemonize.c)
 TARGET_LINK_LIBRARIES(skipd skipdb m ${LIBEV_LIBRARIES})

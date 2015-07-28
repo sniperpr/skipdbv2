@@ -339,20 +339,26 @@ static void update_key(dbclient* client, char* prefix, char* envp[]) {
 
 static void help() {
     printf("help:\n");
-    printf("dbus set key value\n");
-    printf("dbus ram key value\n");
-    printf("dbus replace key value\n");
+    printf("dbus set key=value\n");
+    printf("dbus ram key=value\n");
+    printf("dbus replace key=value\n");
     printf("dbus get key\n");
     printf("dbus list key\n");
-    printf("dbus delay key tick path_of_shell.sh\n");
-    printf("dbus time key H:M:S path_of_shell.sh\n");
+    printf("dbus remove key\n");
     printf("dbus export key\n");
     printf("dbus update key\n");
+    printf("dbus delay key tick path_of_shell.sh\n");
+    printf("dbus time key H:M:S path_of_shell.sh\n");
+    printf("dbus fire key\n");
+    printf("dbus event key path_of_shell.sh\n");
+    printf("dbus inc key=value\n");
+    printf("dbus desc key=value\n");
 }
 
 static int prefix_set_command(dbclient* client, int argc, char **argv)
 {
     int i, n1, n2;
+    char* p;
     n1 = strlen(client->command) + argc - 1;
     for(i = 2; i < argc; i++) {
         n1 += strlen(argv[i]);
@@ -371,6 +377,9 @@ static int prefix_set_command(dbclient* client, int argc, char **argv)
         }
         n2++;
     }
+    p = strstr(client->buf, "=");
+    //assert(NULL != p);
+    *p = ' ';
 
     return n2;
 }
@@ -464,20 +473,19 @@ int main(int argc, char **argv, char * envp[])
             //setnonblock(remote_fd);
             //n1 = parse_common_result(gclient);
         } else if(!strcmp("set", argv[1])) {
-            if(argc < 4) {
+            if((argc < 3) || (NULL == strstr(argv[2], "="))) {
                 err = -16;
                 break;
             }
             strcpy(client->command, argv[1]);
             n2 = prefix_set_command(client, argc, argv);
             write(remote_fd, client->buf, n2);
-            printf("\n");
 
             //setnonblock(remote_fd);
             //n1 = parse_common_result(client);
         } else if(!strcmp("inc", argv[1])) {
-            if(argc < 4) {
-                err = -17;
+            if((argc < 3) || (NULL == strstr(argv[2], "="))) {
+                err = -16;
                 break;
             }
             strcpy(client->command, argv[1]);
@@ -487,8 +495,8 @@ int main(int argc, char **argv, char * envp[])
             setnonblock(remote_fd);
             n1 = parse_get_result(gclient);
         } else if(!strcmp("desc", argv[1])) {
-            if(argc < 4) {
-                err = -17;
+            if((argc < 3) || (NULL == strstr(argv[2], "="))) {
+                err = -16;
                 break;
             }
             strcpy(client->command, argv[1]);
@@ -498,26 +506,24 @@ int main(int argc, char **argv, char * envp[])
             setnonblock(remote_fd);
             n1 = parse_get_result(gclient);
         } else if(!strcmp("ram", argv[1])) {
-            if(argc < 4) {
-                err = -17;
+            if((argc < 3) || (NULL == strstr(argv[2], "="))) {
+                err = -16;
                 break;
             }
             strcpy(client->command, argv[1]);
             n2 = prefix_set_command(client, argc, argv);
             write(remote_fd, client->buf, n2);
-            printf("\n");
 
             //setnonblock(remote_fd);
             //n1 = parse_common_result(client);
         } else if(!strcmp("replace", argv[1])) {
-            if(argc < 4) {
-                err = -18;
+            if((argc < 3) || (NULL == strstr(argv[2], "="))) {
+                err = -16;
                 break;
             }
             strcpy(client->command, argv[1]);
             n2 = prefix_set_command(client, argc, argv);
             write(remote_fd, client->buf, n2);
-            printf("\n");
 
             //setnonblock(remote_fd);
             //n1 = parse_common_result(client);
