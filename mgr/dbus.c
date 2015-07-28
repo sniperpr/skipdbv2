@@ -152,9 +152,65 @@ int parse_common_result(dbclient *client) {
     return 0;
 }
 
+int parse_get_result(dbclient *client) {
+    int n1, n2;
+    char *p1, *p2, *magic = MAGIC;
+
+    do {
+        client->timeout = time(NULL) + 110;
+
+        client->buf_pos = 0;
+        n1 = read_util(client, HEADER_PREFIX);
+        if(n1 < 0) {
+            return n1;
+        }
+
+        if(0 != memcmp(client->buf, magic, MAGIC_LEN)) {
+            //message error
+            return -3;
+        }
+
+        client->buf[HEADER_PREFIX-1] = '\0';
+        if(S2ISUCCESS != str2int(&n2, client->buf+MAGIC_LEN, 10)) {
+            //message error
+            return -4;
+        }
+
+        client->buf_pos = 0;
+        client->timeout = time(NULL) + 510;
+        n1 = read_util(client, n2);
+        if(n1 < 0) {
+            return n1;
+        }
+
+        client->buf[n2] = '\0';
+        p1 = strstr(client->buf, " ");
+        if(NULL == p1) {
+            break;
+        }
+        p2 = strstr(p1+1, " ");
+        if(NULL == p2) {
+            break;
+        }
+        n2 -= (p2-client->buf);
+        if(!strcmp(p2+1, "none\n")) {
+            break;
+        }
+        if(p2[n2-1] != '\n') {
+            printf("%s\n", p2+1);
+        } else {
+            printf("%s", p2+1);
+        }
+        return 0;
+    } while(0);
+
+    printf("\n");
+    return 0;
+}
+
 int parse_list_result(dbclient *client) {
     int n1, n2;
-    char* magic = MAGIC;
+    char *p2, *magic = MAGIC;
 
     for(;;) {
         client->timeout = time(NULL) + 110;
@@ -188,11 +244,11 @@ int parse_list_result(dbclient *client) {
         if(NULL != strstr(client->buf, "__end__")) {
             break;
         }
-        if(client->buf[n2-1] != '\n') {
-            //TODO fix hear
-            printf("%s\n", client->buf);
+        p2 = client->buf;
+        if(p2[n2-1] != '\n') {
+            printf("%s\n", p2);
         } else {
-            printf("%s", client->buf);
+            printf("%s", p2);
         }
     }
 
@@ -378,7 +434,7 @@ int main(int argc, char **argv, char * envp[])
             write(remote_fd, client->buf, n2);
 
             setnonblock(remote_fd);
-            n1 = parse_common_result(gclient);
+            n1 = parse_get_result(gclient);
         } else if(!strcmp("remove", argv[1])) {
             if(argc < 3) {
                 err = -14;
@@ -402,9 +458,10 @@ int main(int argc, char **argv, char * envp[])
             check_buf(client, n1 + HEADER_PREFIX);
             n2 = snprintf(client->buf, client->buf_max, "%s%07d %s %s\n", MAGIC, n1, client->command, argv[2]);
             write(remote_fd, client->buf, n2);
+            printf("\n");
 
-            setnonblock(remote_fd);
-            n1 = parse_common_result(gclient);
+            //setnonblock(remote_fd);
+            //n1 = parse_common_result(gclient);
         } else if(!strcmp("set", argv[1])) {
             if(argc < 4) {
                 err = -16;
@@ -413,9 +470,10 @@ int main(int argc, char **argv, char * envp[])
             strcpy(client->command, argv[1]);
             n2 = prefix_set_command(client, argc, argv);
             write(remote_fd, client->buf, n2);
+            printf("\n");
 
-            setnonblock(remote_fd);
-            n1 = parse_common_result(client);
+            //setnonblock(remote_fd);
+            //n1 = parse_common_result(client);
         } else if(!strcmp("ram", argv[1])) {
             if(argc < 4) {
                 err = -17;
@@ -424,9 +482,10 @@ int main(int argc, char **argv, char * envp[])
             strcpy(client->command, argv[1]);
             n2 = prefix_set_command(client, argc, argv);
             write(remote_fd, client->buf, n2);
+            printf("\n");
 
-            setnonblock(remote_fd);
-            n1 = parse_common_result(client);
+            //setnonblock(remote_fd);
+            //n1 = parse_common_result(client);
         } else if(!strcmp("replace", argv[1])) {
             if(argc < 4) {
                 err = -18;
@@ -435,9 +494,10 @@ int main(int argc, char **argv, char * envp[])
             strcpy(client->command, argv[1]);
             n2 = prefix_set_command(client, argc, argv);
             write(remote_fd, client->buf, n2);
+            printf("\n");
 
-            setnonblock(remote_fd);
-            n1 = parse_common_result(client);
+            //setnonblock(remote_fd);
+            //n1 = parse_common_result(client);
         } else if(!strcmp("event", argv[1])) {
             if(argc < 4) {
                 err = -18;
@@ -448,9 +508,10 @@ int main(int argc, char **argv, char * envp[])
             check_buf(client, n1 + HEADER_PREFIX);
             n2 = snprintf(client->buf, client->buf_max, "%s%07d %s __event__%s %s\n", MAGIC, n1, client->command, argv[2], argv[3]);
             write(remote_fd, client->buf, n2);
+            printf("\n");
 
-            setnonblock(remote_fd);
-            n1 = parse_common_result(client);
+            //setnonblock(remote_fd);
+            //n1 = parse_common_result(client);
         } else if(!strcmp("delay", argv[1])) {
             if(argc < 5) {
                 err = -19;
@@ -466,9 +527,10 @@ int main(int argc, char **argv, char * envp[])
             check_buf(client, n1 + HEADER_PREFIX);
             n2 = snprintf(client->buf, client->buf_max, "%s%07d %s %s %s %s\n", MAGIC, n1, client->command, argv[2], argv[3], argv[4]);
             write(remote_fd, client->buf, n2);
+            printf("\n");
 
-            setnonblock(remote_fd);
-            n1 = parse_common_result(client);
+            //setnonblock(remote_fd);
+            //n1 = parse_common_result(client);
         } else if(!strcmp("time", argv[1])) {
             if(argc < 5) {
                 err = -21;
@@ -485,10 +547,10 @@ int main(int argc, char **argv, char * envp[])
             check_buf(client, n1 + HEADER_PREFIX);
             n2 = snprintf(client->buf, client->buf_max, "%s%07d %s %s %s %s\n", MAGIC, n1, client->command, argv[2], argv[3], argv[4]);
             write(remote_fd, client->buf, n2);
+            printf("\n");
 
-            setnonblock(remote_fd);
-            n1 = parse_common_result(client);
-            err = 0;
+            //setnonblock(remote_fd);
+            //n1 = parse_common_result(client);
         }
     } while(0);
     if(err < 0) {
