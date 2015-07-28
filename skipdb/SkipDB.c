@@ -35,7 +35,7 @@ SkipDB *SkipDB_new(void)
 	self->pidsToRemove = List_new();
 	self->dirtyRecords = List_new();
 
-	self->cacheHighWaterMark = 100000;
+	self->cacheHighWaterMark = 20000;
 	self->cacheLowWaterMark  = 500;
 
 	self->pidToRecord = PHash_new();
