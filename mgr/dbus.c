@@ -486,6 +486,17 @@ int main(int argc, char **argv, char * envp[])
 
             setnonblock(remote_fd);
             n1 = parse_get_result(gclient);
+        } else if(!strcmp("desc", argv[1])) {
+            if(argc < 4) {
+                err = -17;
+                break;
+            }
+            strcpy(client->command, argv[1]);
+            n2 = prefix_set_command(client, argc, argv);
+            write(remote_fd, client->buf, n2);
+
+            setnonblock(remote_fd);
+            n1 = parse_get_result(gclient);
         } else if(!strcmp("ram", argv[1])) {
             if(argc < 4) {
                 err = -17;
