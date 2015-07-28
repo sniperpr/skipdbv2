@@ -445,9 +445,10 @@ int main(int argc, char **argv, char * envp[])
             check_buf(client, n1 + HEADER_PREFIX);
             n2 = snprintf(client->buf, client->buf_max, "%s%07d %s %s\n", MAGIC, n1, client->command, argv[2]);
             write(remote_fd, client->buf, n2);
+            printf("\n");
 
-            setnonblock(remote_fd);
-            n1 = parse_common_result(gclient);
+            //setnonblock(remote_fd);
+            //n1 = parse_common_result(gclient);
         } else if(!strcmp("fire", argv[1])) {
             if(argc < 3) {
                 err = -15;
@@ -474,6 +475,17 @@ int main(int argc, char **argv, char * envp[])
 
             //setnonblock(remote_fd);
             //n1 = parse_common_result(client);
+        } else if(!strcmp("inc", argv[1])) {
+            if(argc < 4) {
+                err = -17;
+                break;
+            }
+            strcpy(client->command, argv[1]);
+            n2 = prefix_set_command(client, argc, argv);
+            write(remote_fd, client->buf, n2);
+
+            setnonblock(remote_fd);
+            n1 = parse_get_result(gclient);
         } else if(!strcmp("ram", argv[1])) {
             if(argc < 4) {
                 err = -17;

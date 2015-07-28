@@ -1,7 +1,7 @@
 #define _XOPEN_SOURCE
 
-#include <stdio.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <getopt.h>
@@ -465,7 +465,7 @@ static int client_run_command(EV_P_ skipd_client* client)
 {
     char *p1, *p2;
     time_t t1, t2, epoch;
-    int tmpi;
+    int tmpi, tmp2;
     struct tm tm1, tm2, *tnow;
     Datum dkey, dvalue;
     delay_cmd* delay_obj;
@@ -635,7 +635,7 @@ static int client_run_command(EV_P_ skipd_client* client)
         }
 
         dvalue = Datum_FromData_length_((unsigned char*)p1, client->data_len - (p1 - client->origin));
-        dvalue.data[dvalue.size-1] = '\0';
+        //dvalue.data[dvalue.size-1] = '\0';
         //FIXEM hard code hear
         if(strlen((char*)dvalue.data) >= 300) {
             p1 = "value too big\n";
@@ -724,7 +724,7 @@ static int client_run_command(EV_P_ skipd_client* client)
         }
 
         dvalue = Datum_FromData_length_((unsigned char*)p1, client->data_len - (p1 - client->origin));
-        dvalue.data[dvalue.size-1] = '\0';
+        //dvalue.data[dvalue.size-1] = '\0';
         //FIXEM hard code hear
         if(strlen((char*)dvalue.data) >= 300) {
             p1 = "value too big\n";
@@ -801,6 +801,46 @@ static int client_run_command(EV_P_ skipd_client* client)
         }
         free(client->key);
 
+        ccrReturn(ctx, ccr_error_ok1);
+    } else if((!strcmp(client->command, "inc")) || (!strcmp(client->command, "desc"))) {
+        p1 = p2+1;
+        p2 = strstr(p1, " ");
+        if(NULL == p2) {
+            ccrStop(ctx, ccr_error_err2);
+        }
+        *p2 = '\0';
+        client->key = p1;
+        p1 = p2+1;
+
+        dkey = Datum_FromCString_(client->key);
+
+        if(S2ISUCCESS != str2int(&tmpi, p1, 10)) {
+            p1 = "error\n";
+            client_send(EV_A_ client, p1, strlen(p1));
+            client->break_level = ccr_break_killed;
+            ccrStop(ctx, ccr_error_err2);
+        }
+
+        dvalue = SkipDB_at_(client->server->db, dkey);
+        if(NULL == dvalue.data) {
+            tmp2 = 0;
+        } else {
+            if(S2ISUCCESS != str2int(&tmp2, (char*)dvalue.data, 10)) {
+                p1 = "error\n";
+                client_send(EV_A_ client, p1, strlen(p1));
+                ccrReturn(ctx, ccr_error_ok1);
+            }
+        }
+
+        //TODO remote \n from data?
+        if(!strcmp(client->command, "inc")) {
+            sprintf(static_buffer, "%d", tmp2+tmpi);
+        } else {
+            sprintf(static_buffer, "%d", tmp2-tmpi);
+        }
+        dvalue = Datum_FromCString_(static_buffer);
+        SkipDB_at_put_(client->server->db, dkey, dvalue);
+        client_send(EV_A_ client, (char*)dvalue.data, dvalue.size);;
         ccrReturn(ctx, ccr_error_ok1);
     }
 
@@ -891,6 +931,9 @@ static int client_ccr_process(EV_P_ skipd_client* client)
 
         assert(CS->rt > 0);
         client->origin[client->data_len] = '\0';
+        if('\n' == client->origin[client->data_len-1]) {
+            client->origin[client->data_len-1] = '\0';
+        }
 
         // Command subroutine
         memset(&client->ccr_runcmd, 0, sizeof(struct ccrContextTag));
@@ -1039,7 +1082,7 @@ static struct option options[] = {
 } */
 
 static void server_init_delay(EV_P_ skipd_server *server) {
-    int n1, n2;
+    int n1;
     char *p1;
     Datum skey, dkey, dvalue;
     SkipDBCursor* cursor = NULL;
@@ -1079,7 +1122,7 @@ static void server_init_delay(EV_P_ skipd_server *server) {
 }
 
 static void server_init_time(EV_P_ skipd_server *server) {
-    int n1, n2;
+    int n1;
     char *p1;
     Datum skey, dkey, dvalue;
     SkipDBCursor* cursor = NULL;
