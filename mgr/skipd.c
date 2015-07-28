@@ -911,9 +911,14 @@ static int client_ccr_process(EV_P_ skipd_client* client)
 
         assert(CS->rt > 0);
         client->origin[client->data_len] = '\0';
-        if('\n' == client->origin[client->data_len-1]) {
-            client->origin[client->data_len-1] = '\0';
+        //TODO must end with \n ?
+        if('\n' != client->origin[client->data_len-1]) {
+            p = "value error\n";
+            client_send(EV_A_ client, p, strlen(p));
+            client->break_level = ccr_break_killed;
+            ccrReturn(ctx, ccr_error_err2);
         }
+        client->origin[client->data_len-1] = '\0';
 
         // Command subroutine
         memset(&client->ccr_runcmd, 0, sizeof(struct ccrContextTag));
