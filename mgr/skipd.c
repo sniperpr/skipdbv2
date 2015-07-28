@@ -222,7 +222,7 @@ static void client_write(EV_P_ ev_io *w, int revents) {
     skipd_client* client = container_of(w, skipd_client, io_write);
     int rt;
 
-    skipd_log(SKIPD_DEBUG, "begin for writing\n");
+    //skipd_log(SKIPD_DEBUG, "begin for writing\n");
 
     rt = client_ccr_write(EV_A_ client);
     if(ccr_break_killed == client->break_level) {
