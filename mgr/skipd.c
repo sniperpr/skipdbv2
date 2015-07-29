@@ -16,8 +16,9 @@
 #include <netinet/tcp.h>
 #include <sys/time.h>
 #include <time.h>
-#include <unistd.h>
 #include <sys/un.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <syslog.h>
 #include <ev.h>
 
@@ -35,6 +36,9 @@ typedef struct _skipd_server {
     int to_commit;
 
     SkipDB *db;
+    int curr_db;
+    int switch_mark;
+    int in_doing;
 
     int daemon;
     char db_path[SK_PATH_MAX];
@@ -109,9 +113,11 @@ typedef struct _time_cmd {
 } time_cmd;
 
 /* declare */
+extern int SkipDB_maxPos(SkipDB* self);
 extern SkipDBRecord* SkipDB_list_first(SkipDB* self, Datum k, SkipDBCursor** pcur);
 extern SkipDBRecord* SkipDB_list_next(SkipDB* self, Datum k, SkipDBCursor* cursor);
 static void server_sync(EV_P_ skipd_server* server);
+static void server_switch(skipd_server* server);
 
 extern int skipd_daemonize(char *_lock_path);
 static int setnonblock(int fd);
@@ -1041,16 +1047,78 @@ int unix_socket_init(struct sockaddr_un* socket_un, char* sock_path, int max_que
     return fd;
 }
 
+static void server_open(skipd_server* server) {
+    char real_path[SK_PATH_MAX];
+    char nbuf[10];
+    int n, sf;
+
+    sprintf(real_path, "%s/switch", server->db_path);
+    sf = open(real_path, O_RDONLY);
+    if(sf > 0) {
+        n = read(sf, nbuf, sizeof(nbuf));
+        close(sf);
+        if (n) { 
+            n = atoi(nbuf);
+        }
+        server->curr_db = n;
+    }
+    sf = open(real_path, O_TRUNC | O_RDWR | O_CREAT, 0640);
+    if (sf < 0) {
+        skipd_log(SKIPD_DEBUG, "cannot write swich file");
+        exit(1);
+    }
+    n = sprintf(nbuf, "%d", server->curr_db);
+    write(sf, nbuf, n);
+    close(sf);
+
+    sprintf(real_path, "%s/%d", server->db_path, server->curr_db);
+    server->db = SkipDB_new();
+    SkipDB_setPath_(server->db, real_path);
+    //syslog(LOG_PERROR, "LOG HEAR:%s\n", server->db_path);
+    SkipDB_open(server->db);
+}
+
+static void server_switch(skipd_server* server) {
+    char real_path[SK_PATH_MAX];
+    char nbuf[10];
+    int n1, n2, sf;
+    SkipDB *tmp, *other = SkipDB_new();
+    n2 = 1 - server->curr_db;
+    sprintf(real_path, "%s/%d", server->db_path, n2);
+    SkipDB_setPath_(other, real_path);
+    SkipDB_delete(other);
+    SkipDB_open(other);
+
+    SkipDB_mergeInto_(server->db, other);
+    SkipDB_beginTransaction(other);
+    SkipDB_commitTransaction(other);
+
+    tmp = server->db;
+    sprintf(real_path, "%s/switch", server->db_path);
+    sf = open(real_path, O_TRUNC | O_RDWR | O_CREAT, 0640);
+    if (sf < 0) {
+        skipd_log(SKIPD_DEBUG, "cannot write swich file");
+        exit(1);
+    }
+    n1 = sprintf(nbuf, "%d", n2);
+    write(sf, nbuf, n1);
+    close(sf);
+
+    server->db = other;
+    server->curr_db = n2;
+
+    SkipDB_delete(tmp);
+    SkipDB_free(tmp);
+}
+
 int server_init(skipd_server* server, int max_queue) {
     int count;
 
-    server->db = SkipDB_new();
-    SkipDB_setPath_(server->db, server->db_path);
-    //syslog(LOG_PERROR, "LOG HEAR:%s\n", server->db_path);
-    SkipDB_open(server->db);
+    server->switch_mark = 8*1024*1024;//default 8M
+    server_open(server);
 
     count = SkipDB_count(server->db);
-    skipd_log(SKIPD_DEBUG, "Load count=%d\n", count);
+    skipd_log(SKIPD_DEBUG, "Load count=%d maxPos=%d\n", count, SkipDB_maxPos(server->db));
 
     server->fd = unix_socket_init(&server->socket, server->sock_path, max_queue);
     server->socket_len = sizeof(server->socket.sun_family) + strlen(server->socket.sun_path);
@@ -1203,6 +1271,30 @@ static void server_sync_tick(EV_P_ ev_timer *w, int revents) {
         SkipDB_beginTransaction(server->db);
         SkipDB_commitTransaction(server->db);
     }
+
+    if(SkipDB_maxPos(server->db) > server->switch_mark) {
+        //TODO cannot swith in list command since the cursor in it
+        server_switch(server);
+    }
+}
+
+static int check_dbpath(skipd_server* server) 
+{
+    struct stat s;
+    int err = stat(server->db_path, &s);
+    if(-1 == err) {
+        if(ENOENT == errno) {
+            mkdir(server->db_path, 0700);
+        } else {
+            return -1;
+        } 
+    } else {
+        if(!S_ISDIR(s.st_mode)) {
+            return -1;
+        }
+    }
+
+    return 0;
 }
 
 int main(int argc, char **argv)
@@ -1214,7 +1306,7 @@ int main(int argc, char **argv)
     ev_timer init_watcher = {0};
     EV_P  = ev_default_loop(0);
 
-    global_server = (skipd_server*)malloc(sizeof(skipd_server));
+    global_server = (skipd_server*)calloc(1, sizeof(skipd_server));
     server = global_server;
 
     strcpy(server->sock_path, "/tmp/.skipd_server_sock");
@@ -1239,6 +1331,11 @@ int main(int argc, char **argv)
                 exit(1);
                 break;
             }
+    }
+
+    if(0 == strlen(server->db_path) || (0 != check_dbpath(server))) {
+        fprintf(stderr, "Database path error\n");
+        return 1;
     }
 
     if(daemon && skipd_daemonize(server->pid_path)) {

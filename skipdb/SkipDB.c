@@ -879,3 +879,7 @@ SkipDBRecord* SkipDB_list_first(SkipDB* self, Datum k, SkipDBCursor** pcur) {
         return SkipDB_list_next(self, k, cursor);
     }
 }
+
+int SkipDB_maxPos(SkipDB* self) {
+    return self->udb->records->file->maxPos;
+}
