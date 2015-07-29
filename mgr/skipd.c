@@ -31,6 +31,9 @@ typedef struct _skipd_server {
     struct sockaddr_un socket;
     int socket_len;
 
+    ev_timer watcher;
+    int to_commit;
+
     SkipDB *db;
 
     int daemon;
@@ -108,6 +111,7 @@ typedef struct _time_cmd {
 /* declare */
 extern SkipDBRecord* SkipDB_list_first(SkipDB* self, Datum k, SkipDBCursor** pcur);
 extern SkipDBRecord* SkipDB_list_next(SkipDB* self, Datum k, SkipDBCursor* cursor);
+static void server_sync(EV_P_ skipd_server* server);
 
 extern int skipd_daemonize(char *_lock_path);
 static int setnonblock(int fd);
@@ -164,7 +168,7 @@ void skipd_log(int filter, const char *format, ...)
 }
 
 static void client_release(EV_P_ skipd_client* client) {
-    skipd_log(SKIPD_DEBUG, "closing client\n");
+    //skipd_log(SKIPD_DEBUG, "closing client\n");
 
     ev_io_stop(EV_A_ &client->io_read);
     ev_io_stop(EV_A_ &client->io_write);
@@ -188,7 +192,7 @@ static void client_read_inner(EV_P_ skipd_client* client, int revents) {
     assert(client->break_level == 0);
 
     rt = client_ccr_process(EV_A_ client);
-    skipd_log(SKIPD_DEBUG, "process:%d\n", rt);
+    //skipd_log(SKIPD_DEBUG, "process:%d\n", rt);
     if(ccr_error_err1 == rt) {
         //Close it directly
         client_release(EV_A_ client);
@@ -502,9 +506,13 @@ static int client_run_command(EV_P_ skipd_client* client)
 
         dkey = Datum_FromCString_(client->key);
         dvalue = Datum_FromData_length_((unsigned char*)p1, client->data_len - (p1 - client->origin));
+
+        //OK a little hack hear
         SkipDB_beginTransaction(client->server->db);
         SkipDB_at_put_(client->server->db, dkey, dvalue);
-        SkipDB_commitTransaction(client->server->db);
+        //SkipDB_commitTransaction(client->server->db);
+	    //SkipDB_sync(client->server->db);
+        server_sync(EV_A_ client->server);
 
         p1 = "ok\n";
         client_send(EV_A_ client, p1, strlen(p1));
@@ -561,7 +569,8 @@ static int client_run_command(EV_P_ skipd_client* client)
             dvalue = Datum_FromData_length_((unsigned char*)p1, client->data_len - (p1 - client->origin));
             SkipDB_beginTransaction(client->server->db);
             SkipDB_at_put_(client->server->db, dkey, dvalue);
-            SkipDB_commitTransaction(client->server->db);
+            //SkipDB_commitTransaction(client->server->db);
+            server_sync(EV_A_ client->server);
         }
         ccrReturn(ctx, ccr_error_ok1);
     } else if(!strcmp(client->command, "list")) {
@@ -599,7 +608,8 @@ static int client_run_command(EV_P_ skipd_client* client)
 
         SkipDB_beginTransaction(client->server->db);
         SkipDB_removeAt_(client->server->db, dkey);
-        SkipDB_commitTransaction(client->server->db);
+        //SkipDB_commitTransaction(client->server->db);
+        server_sync(EV_A_ client->server);
         p1 = "ok\n";
         client_send(EV_A_ client, p1, strlen(p1));
         ccrReturn(ctx, ccr_error_ok1);
@@ -659,13 +669,15 @@ static int client_run_command(EV_P_ skipd_client* client)
             //Just replace the old
             SkipDB_beginTransaction(client->server->db);
             SkipDB_at_put_(client->server->db, dkey, dvalue);
-            SkipDB_commitTransaction(client->server->db);
+            //SkipDB_commitTransaction(client->server->db);
+            server_sync(EV_A_ client->server);
             ccrReturn(ctx, ccr_error_ok1);
         }
 
         SkipDB_beginTransaction(client->server->db);
         SkipDB_at_put_(client->server->db, dkey, dvalue);
-        SkipDB_commitTransaction(client->server->db);
+        //SkipDB_commitTransaction(client->server->db);
+        server_sync(EV_A_ client->server);
 
         ev_timer_init(&delay_obj->watcher, delay_cmd_cb, delay_obj->tick, delay_obj->tick);
         ev_timer_start(EV_A_ &delay_obj->watcher);
@@ -731,7 +743,8 @@ static int client_run_command(EV_P_ skipd_client* client)
 
         SkipDB_beginTransaction(client->server->db);
         SkipDB_at_put_(client->server->db, dkey, dvalue);
-        SkipDB_commitTransaction(client->server->db);
+        //SkipDB_commitTransaction(client->server->db);
+        server_sync(EV_A_ client->server);
 
         t1 = time(NULL);
         tnow = localtime(&t1);
@@ -980,7 +993,7 @@ static void server_cb(EV_P_ ev_io *w, int revents) {
             break;
         }
 
-        skipd_log(SKIPD_DEBUG, "accepted a client\n");
+        //skipd_log(SKIPD_DEBUG, "accepted a client\n");
         client = client_new(client_fd);
         client->server = server;
         ev_io_start(EV_A_ &client->io_read);
@@ -1171,6 +1184,27 @@ static void server_cmd_init(EV_P_ ev_timer *w, int revents) {
     server_init_time(EV_A_ server);
 }
 
+static void server_sync(EV_P_ skipd_server* server) {
+    ev_timer_again(EV_A_ &server->watcher);
+
+    server->to_commit = 1;
+    SkipDB_sync(server->db);
+}
+
+static void server_sync_tick(EV_P_ ev_timer *w, int revents) {
+    skipd_server *server = global_server;
+
+    if(server->to_commit) {
+        server->to_commit = 0;
+        ev_timer_stop(EV_A_ w);
+        skipd_log(SKIPD_DEBUG, "sync tick\n");
+
+        //Do transaction
+        SkipDB_beginTransaction(server->db);
+        SkipDB_commitTransaction(server->db);
+    }
+}
+
 int main(int argc, char **argv)
 {
     int n = 0, daemon = 0, max_queue = -1;
@@ -1235,10 +1269,16 @@ int main(int argc, char **argv)
     //ev_periodic_start(EV_A_ &every_few_seconds);
     ev_timer_init(EV_A_ &init_watcher, server_cmd_init, 5.0, 0.0);
     ev_timer_start(EV_A_ &init_watcher);
-
+    //update at 2s after write
+    ev_timer_init(EV_A_ &server->watcher, server_sync_tick, 0.0, 2.0);
+    //ev_timer_start(EV_A_ &server->watcher);
 
     // Run our loop, ostensibly forever
     ev_loop(EV_A_ 0);
+
+    //sync at exit
+    SkipDB_beginTransaction(server->db);
+    SkipDB_commitTransaction(server->db);
 
     SkipDB_close(server->db);
     skipd_log(SKIPD_DEBUG, "exit..\n");

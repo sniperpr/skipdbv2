@@ -35,7 +35,7 @@ SkipDB *SkipDB_new(void)
 	self->pidsToRemove = List_new();
 	self->dirtyRecords = List_new();
 
-	self->cacheHighWaterMark = 20000;
+	self->cacheHighWaterMark = 10000;
 	self->cacheLowWaterMark  = 500;
 
 	self->pidToRecord = PHash_new();
@@ -808,7 +808,7 @@ void SkipDB_mergeInto_(SkipDB *self, SkipDB *other)
 }
 
 int SkipDB_exists(SkipDB *self, Datum key) {
-    Datum dvalue = SkipDB_at_(self, key); 
+    Datum dvalue = SkipDB_at_(self, key);
     if(NULL == dvalue.data) {
         return 0;
     } else {
