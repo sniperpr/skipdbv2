@@ -2,7 +2,12 @@
 rewrite and fix for https://github.com/stevedekorte/skipdb
 嵌入式 k/v 数据库，编译大小只有 300k。可以代替nvram，并有nvram更强大的功能。[详细说明](http://koolshare.cn/thread-4850-1-1.html)
 
-实现功能有：
+# 速度
+* 写15000条数据需要6s
+* time ./test.sh #测试脚本在tests目录
+* real	0m6.697s
+
+# 实现功能有：
 
 * dbus set key=value
 * dbus ram key=value
