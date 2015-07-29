@@ -9,8 +9,8 @@ rewrite and fix for https://github.com/stevedekorte/skipdb
 * dbus replace key=value
 * dbus get key
 * dbus list key
-* dbus delay key tick path_of_shell.sh
-* dbus time key H:M:S path_of_shell.sh
+* dbus delay key tick path_of_shell.sh #定时运行脚本,脚本情使用绝对路径
+* dbus time key H:M:S path_of_shell.sh #绝对时间运行脚本,脚本情使用绝对路径
 * dbus export key #将配置导入到脚本
 * dbus update key #将脚本配置保存到数据库
 * dbus inc key=value #增加数值
