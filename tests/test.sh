@@ -4,7 +4,7 @@ COUNTER=0
 
 V="your are the best"
 K="hello"
-while [  $COUNTER -lt 5000 ]; do
+while [  $COUNTER -lt 10000 ]; do
     #echo The counter is $V$COUNTER
     ../build/bin/dbus set $K$COUNTER=$V$COUNTER
     #../build/bin/dbus get $K$COUNTER

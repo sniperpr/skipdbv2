@@ -1281,7 +1281,12 @@ static void server_sync_tick(EV_P_ ev_timer *w, int revents) {
 static int check_dbpath(skipd_server* server) 
 {
     struct stat s;
-    int err = stat(server->db_path, &s);
+    int err, n = strlen(server->db_path);
+
+    if('/' == server->db_path[n]) {
+        server->db_path[n] = '\0';
+    }
+    err = stat(server->db_path, &s);
     if(-1 == err) {
         if(ENOENT == errno) {
             mkdir(server->db_path, 0700);

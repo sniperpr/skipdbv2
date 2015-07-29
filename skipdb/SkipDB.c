@@ -64,6 +64,9 @@ void SkipDB_dealloc(SkipDB *self)
 	List_do_(self->cursors, (ListDoCallback *)SkipDBCursor_release);
 	List_free(self->cursors);
 
+        UDB_free(self->udb);
+        self->udb = NULL;
+
 	List_free(self->pidsToRemove);
 	List_free(self->dirtyRecords);
 	PHash_free(self->pidToRecord);
