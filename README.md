@@ -1,5 +1,6 @@
 # skipdbv2
 rewrite and fix for https://github.com/stevedekorte/skipdb
+嵌入式 k/v 数据库，编译大小只有 300k。可以代替nvram，并有nvram更强大的功能。[详细说明](http://koolshare.cn/thread-4850-1-1.html)
 
 实现功能有：
 
