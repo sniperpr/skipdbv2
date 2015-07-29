@@ -1,6 +1,8 @@
 # skipdbv2
 rewrite and fix for https://github.com/stevedekorte/skipdb
 嵌入式 k/v 数据库，编译大小只有 300k。可以代替nvram，并有nvram更强大的功能。[详细说明](http://koolshare.cn/thread-4850-1-1.html)
+为了在嵌入式下更少的占用jffs的空间。建议最多使用配置条目为1w。（merlin正常使用nvram的配置条目为2000条）
+当jffs占用大于8M时，会进行一次refresh，重新计算空间。
 
 # 速度
 * 写15000条数据需要6s
