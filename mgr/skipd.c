@@ -584,6 +584,7 @@ static int client_run_command(EV_P_ skipd_client* client)
         client->key = p1;
         p1 = p2+1;
 
+        client->server->in_doing++;
         CS->skey = Datum_FromCString_(client->key);
         CS->record = SkipDB_list_first(client->server->db, CS->skey, &CS->cursor);
         while(NULL != CS->record) {
@@ -603,6 +604,7 @@ static int client_run_command(EV_P_ skipd_client* client)
         if(NULL != CS->cursor) {
             SkipDBCursor_release(CS->cursor);
         }
+        client->server->in_doing--;
 
         ccrReturn(ctx, ccr_error_ok1);
     } else if(!strcmp(client->command, "remove")) {
@@ -780,6 +782,7 @@ static int client_run_command(EV_P_ skipd_client* client)
 
         CS->n = 0;
         CS->skey = Datum_FromCString_(client->key);
+        client->server->in_doing++;
         CS->record = SkipDB_list_first(client->server->db, CS->skey, &CS->cursor);
         while(NULL != CS->record) {
             dkey = SkipDBRecord_keyDatum(CS->record);
@@ -795,6 +798,7 @@ static int client_run_command(EV_P_ skipd_client* client)
         client_send(EV_A_ client, p1, strlen(p1));
         ccrReturn(ctx, ccr_error_ok);
 
+        client->server->in_doing--;
         if(NULL != CS->cursor) {
             SkipDBCursor_release(CS->cursor);
         }
@@ -1057,7 +1061,7 @@ static void server_open(skipd_server* server) {
     if(sf > 0) {
         n = read(sf, nbuf, sizeof(nbuf));
         close(sf);
-        if (n) { 
+        if (n) {
             n = atoi(nbuf);
         }
         server->curr_db = n;
@@ -1272,13 +1276,12 @@ static void server_sync_tick(EV_P_ ev_timer *w, int revents) {
         SkipDB_commitTransaction(server->db);
     }
 
-    if(SkipDB_maxPos(server->db) > server->switch_mark) {
-        //TODO cannot swith in list command since the cursor in it
+    if((0 == server->in_doing) && (SkipDB_maxPos(server->db) > server->switch_mark)) {
         server_switch(server);
     }
 }
 
-static int check_dbpath(skipd_server* server) 
+static int check_dbpath(skipd_server* server)
 {
     struct stat s;
     int err, n = strlen(server->db_path);
@@ -1292,7 +1295,7 @@ static int check_dbpath(skipd_server* server)
             mkdir(server->db_path, 0700);
         } else {
             return -1;
-        } 
+        }
     } else {
         if(!S_ISDIR(s.st_mode)) {
             return -1;
