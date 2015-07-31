@@ -20,7 +20,7 @@ typedef struct _dbclient {
     int remote_fd;
     char command[DELAY_KEY_LEN+1];
     char key[DELAY_KEY_LEN+1];
-    unsigned int timeout;
+    //unsigned int timeout;
 
     char* buf;
     int buf_max;
@@ -81,12 +81,15 @@ static void check_buf(dbclient* client, int len) {
     }
 }
 
-int read_util(dbclient* client, int len) {
+static int read_util(dbclient* client, int len, unsigned int delay) {
     int clen, n;
-    unsigned int now;
-    struct timeval tv;
+    unsigned int now, timeout;
+    struct timeval tv,  tv2;
 
     check_buf(client, len);
+    gettimeofday(&tv2, NULL);
+    timeout = (tv2.tv_sec * 1000) + (tv2.tv_usec / 1000) + delay;
+    client->buf_pos = 0;
 
     for(;;) {
         clen = len - client->buf_pos;
@@ -94,8 +97,8 @@ int read_util(dbclient* client, int len) {
         if(n < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 gettimeofday(&tv, NULL);
-                now = (tv.tv_sec * 1000) + (tv.tv_usec / 1000) + 510;
-                if(now > client->timeout) {
+                now = (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
+                if(now > timeout) {
                     break;
                 }
 
@@ -123,14 +126,9 @@ int read_util(dbclient* client, int len) {
 int parse_common_result(dbclient *client) {
     int n1, n2;
     char* magic = MAGIC;
-    struct timeval tv;
 
     do {
-        gettimeofday(&tv, NULL);
-        client->timeout = (tv.tv_sec * 1000) + (tv.tv_usec / 1000) + 110;
-
-        client->buf_pos = 0;
-        n1 = read_util(client, HEADER_PREFIX);
+        n1 = read_util(client, HEADER_PREFIX, 110);
         if(n1 < 0) {
             return n1;
         }
@@ -146,10 +144,7 @@ int parse_common_result(dbclient *client) {
             return -4;
         }
 
-        client->buf_pos = 0;
-        gettimeofday(&tv, NULL);
-        client->timeout = (tv.tv_sec * 1000) + (tv.tv_usec / 1000) + 110;
-        n1 = read_util(client, n2);
+        n1 = read_util(client, n2, 110);
         if(n1 < 0) {
             return n1;
         }
@@ -170,14 +165,9 @@ int parse_common_result(dbclient *client) {
 int parse_get_result(dbclient *client) {
     int n1, n2;
     char *p1, *p2, *magic = MAGIC;
-    struct timeval tv;
 
     do {
-        gettimeofday(&tv, NULL);
-        client->timeout = (tv.tv_sec * 1000) + (tv.tv_usec / 1000) + 110;
-
-        client->buf_pos = 0;
-        n1 = read_util(client, HEADER_PREFIX);
+        n1 = read_util(client, HEADER_PREFIX, 110);
         if(n1 < 0) {
             return n1;
         }
@@ -193,10 +183,7 @@ int parse_get_result(dbclient *client) {
             return -4;
         }
 
-        client->buf_pos = 0;
-        gettimeofday(&tv, NULL);
-        client->timeout = (tv.tv_sec * 1000) + (tv.tv_usec / 1000) + 510;
-        n1 = read_util(client, n2);
+        n1 = read_util(client, n2, 510);
         if(n1 < 0) {
             return n1;
         }
@@ -229,14 +216,9 @@ int parse_get_result(dbclient *client) {
 int parse_list_result(dbclient *client) {
     int n1, n2;
     char *p1, *p2, *magic = MAGIC;
-    struct timeval tv;
 
     for(;;) {
-        gettimeofday(&tv, NULL);
-        client->timeout = (tv.tv_sec * 1000) + (tv.tv_usec / 1000) + 110;
-
-        client->buf_pos = 0;
-        n1 = read_util(client, HEADER_PREFIX);
+        n1 = read_util(client, HEADER_PREFIX, 110);
         if(n1 < 0) {
             return n1;
         }
@@ -252,10 +234,7 @@ int parse_list_result(dbclient *client) {
             return -4;
         }
 
-        client->buf_pos = 0;
-        gettimeofday(&tv, NULL);
-        client->timeout = (tv.tv_sec * 1000) + (tv.tv_usec / 1000) + 510;
-        n1 = read_util(client, n2);
+        n1 = read_util(client, n2, 510);
         if(n1 < 0) {
             return n1;
         }
@@ -288,10 +267,7 @@ int parse_script_result(dbclient *client) {
     char* magic = MAGIC;
 
     for(;;) {
-        client->timeout = time(NULL) + 110;
-
-        client->buf_pos = 0;
-        n1 = read_util(client, HEADER_PREFIX);
+        n1 = read_util(client, HEADER_PREFIX, 110);
         if(n1 < 0) {
             return n1;
         }
@@ -307,9 +283,7 @@ int parse_script_result(dbclient *client) {
             return -4;
         }
 
-        client->buf_pos = 0;
-        client->timeout = time(NULL) + 510;
-        n1 = read_util(client, n2);
+        n1 = read_util(client, n2, 510);
         if(n1 < 0) {
             return n1;
         }
@@ -326,18 +300,18 @@ int parse_script_result(dbclient *client) {
         if(client->buf[n2-1] == '\n') {
             client->buf[n2-1] = '\0';
         }
-        printf("export %s=%s;", p1, p2);
+        printf("export %s=\"%s\";", p1, p2);
     }
 
     return 0;
 }
 
-static void update_key(dbclient* client, char* prefix, char* envp[]) {
+static void bulk_key(dbclient* client, char* command, char* prefix, char* envp[]) {
     char** env;
     char *p1, *p2;
     int n1, n2, nenv, nc, nkey, np = strlen(prefix);
 
-    strcpy(client->command, "replace");
+    strcpy(client->command, command);
     nc = strlen(client->command);
     for (env = envp; *env != 0; env++) {
         p1 = *env;
@@ -364,7 +338,7 @@ static void update_key(dbclient* client, char* prefix, char* envp[]) {
     }
 }
 
-static void help() {
+static void help(void) {
     printf("help:\n");
     printf("dbus set key=value\n");
     printf("dbus ram key=value\n");
@@ -461,7 +435,13 @@ int main(int argc, char **argv, char * envp[])
                 err = -13;
                 break;
             }
-            update_key(gclient, argv[2], envp);
+            bulk_key(gclient, "replace", argv[2], envp);
+        } else if(!strcmp("save", argv[1])) {
+            if(argc < 3) {
+                err = -13;
+                break;
+            }
+            bulk_key(gclient, "set", argv[2], envp);
         } else if(!strcmp("get", argv[1])) {
             if(argc < 3) {
                 err = -13;
@@ -485,7 +465,6 @@ int main(int argc, char **argv, char * envp[])
             check_buf(client, n1 + HEADER_PREFIX);
             n2 = snprintf(client->buf, client->buf_max, "%s%07d %s %s\n", MAGIC, n1, client->command, argv[2]);
             write(remote_fd, client->buf, n2);
-            printf("\n");
 
             //setnonblock(remote_fd);
             //n1 = parse_common_result(gclient);
@@ -499,7 +478,6 @@ int main(int argc, char **argv, char * envp[])
             check_buf(client, n1 + HEADER_PREFIX);
             n2 = snprintf(client->buf, client->buf_max, "%s%07d %s %s\n", MAGIC, n1, client->command, argv[2]);
             write(remote_fd, client->buf, n2);
-            printf("\n");
 
             //setnonblock(remote_fd);
             //n1 = parse_common_result(gclient);
