@@ -35,7 +35,7 @@ void print_time(char* prefix)
 
     gettimeofday (&tv, NULL);
     ms = (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
-    printf("%s: %03ld\n", prefix, ms);
+    printf("%s: %03u\n", prefix, ms);
 }
 
 int create_client_fd(char* sock_path) {
