@@ -32,7 +32,7 @@ int create_client_fd(char* sock_path) {
     int len, remote_fd;
     struct sockaddr_un remote;
 
-    if(-1 == (remote_fd = socket(AF_UNIX, SOCK_STREAM, 0))) {
+    if(-1 == (remote_fd = socket(PF_UNIX, SOCK_STREAM, 0))) {
         perror("socket");
         return -1;
     }

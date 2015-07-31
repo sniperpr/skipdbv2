@@ -1031,7 +1031,7 @@ int unix_socket_init(struct sockaddr_un* socket_un, char* sock_path, int max_que
     unlink(sock_path);
 
     // Setup a unix socket listener.
-    fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    fd = socket(PF_UNIX, SOCK_STREAM, 0);
     //fd = socketpair(AF_UNIX, SOCK_STREAM, 0);
     if (-1 == fd) {
         perror("echo server socket");
