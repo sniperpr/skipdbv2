@@ -20,13 +20,23 @@ typedef struct _dbclient {
     int remote_fd;
     char command[DELAY_KEY_LEN+1];
     char key[DELAY_KEY_LEN+1];
-    time_t timeout;
+    unsigned int timeout;
 
     char* buf;
     int buf_max;
     int buf_len;
     int buf_pos;
 } dbclient;
+
+void print_time(char* prefix)
+{
+    struct timeval tv;
+    unsigned int ms;
+
+    gettimeofday (&tv, NULL);
+    ms = (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
+    printf("%s: %03ld\n", prefix, ms);
+}
 
 int create_client_fd(char* sock_path) {
     int len, remote_fd;
@@ -73,7 +83,8 @@ static void check_buf(dbclient* client, int len) {
 
 int read_util(dbclient* client, int len) {
     int clen, n;
-    time_t now;
+    unsigned int now;
+    struct timeval tv;
 
     check_buf(client, len);
 
@@ -82,7 +93,8 @@ int read_util(dbclient* client, int len) {
         n = recv(client->remote_fd, client->buf + client->buf_pos, clen, 0);
         if(n < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                now = time(NULL);
+                gettimeofday(&tv, NULL);
+                now = (tv.tv_sec * 1000) + (tv.tv_usec / 1000) + 510;
                 if(now > client->timeout) {
                     break;
                 }
@@ -111,9 +123,11 @@ int read_util(dbclient* client, int len) {
 int parse_common_result(dbclient *client) {
     int n1, n2;
     char* magic = MAGIC;
+    struct timeval tv;
 
     do {
-        client->timeout = time(NULL) + 110;
+        gettimeofday(&tv, NULL);
+        client->timeout = (tv.tv_sec * 1000) + (tv.tv_usec / 1000) + 110;
 
         client->buf_pos = 0;
         n1 = read_util(client, HEADER_PREFIX);
@@ -133,7 +147,8 @@ int parse_common_result(dbclient *client) {
         }
 
         client->buf_pos = 0;
-        client->timeout = time(NULL) + 510;
+        gettimeofday(&tv, NULL);
+        client->timeout = (tv.tv_sec * 1000) + (tv.tv_usec / 1000) + 110;
         n1 = read_util(client, n2);
         if(n1 < 0) {
             return n1;
@@ -155,9 +170,11 @@ int parse_common_result(dbclient *client) {
 int parse_get_result(dbclient *client) {
     int n1, n2;
     char *p1, *p2, *magic = MAGIC;
+    struct timeval tv;
 
     do {
-        client->timeout = time(NULL) + 110;
+        gettimeofday(&tv, NULL);
+        client->timeout = (tv.tv_sec * 1000) + (tv.tv_usec / 1000) + 110;
 
         client->buf_pos = 0;
         n1 = read_util(client, HEADER_PREFIX);
@@ -177,7 +194,8 @@ int parse_get_result(dbclient *client) {
         }
 
         client->buf_pos = 0;
-        client->timeout = time(NULL) + 510;
+        gettimeofday(&tv, NULL);
+        client->timeout = (tv.tv_sec * 1000) + (tv.tv_usec / 1000) + 510;
         n1 = read_util(client, n2);
         if(n1 < 0) {
             return n1;
@@ -211,9 +229,11 @@ int parse_get_result(dbclient *client) {
 int parse_list_result(dbclient *client) {
     int n1, n2;
     char *p1, *p2, *magic = MAGIC;
+    struct timeval tv;
 
     for(;;) {
-        client->timeout = time(NULL) + 110;
+        gettimeofday(&tv, NULL);
+        client->timeout = (tv.tv_sec * 1000) + (tv.tv_usec / 1000) + 110;
 
         client->buf_pos = 0;
         n1 = read_util(client, HEADER_PREFIX);
@@ -233,7 +253,8 @@ int parse_list_result(dbclient *client) {
         }
 
         client->buf_pos = 0;
-        client->timeout = time(NULL) + 510;
+        gettimeofday(&tv, NULL);
+        client->timeout = (tv.tv_sec * 1000) + (tv.tv_usec / 1000) + 510;
         n1 = read_util(client, n2);
         if(n1 < 0) {
             return n1;
@@ -394,13 +415,11 @@ dbclient* gclient;
 int main(int argc, char **argv, char * envp[])
 {
     int n1, n2, err = 0;
-    time_t t3;
     struct tm tm1;
     dbclient* client;
     int remote_fd;
 
-    t3 = time(NULL);
-    fprintf(stderr, "start:%d\n", t3);
+    print_time("start");
 
     remote_fd = create_client_fd("/tmp/.skipd_server_sock");
     if(-1 == remote_fd) {
@@ -491,11 +510,9 @@ int main(int argc, char **argv, char * envp[])
             }
             strcpy(client->command, argv[1]);
             n2 = prefix_set_command(client, argc, argv);
-            t3 = time(NULL);
-            fprintf(stderr, "write:%d\n", t3);
+            print_time("start");
             write(remote_fd, client->buf, n2);
-            t3 = time(NULL);
-            fprintf(stderr, "end:%d\n", t3);
+            print_time("end");
 
             //setnonblock(remote_fd);
             //n1 = parse_common_result(client);
