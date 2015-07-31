@@ -28,7 +28,7 @@ typedef struct _dbclient {
     int buf_pos;
 } dbclient;
 
-void print_time(char* prefix)
+/* static void print_time(char* prefix)
 {
     struct timeval tv;
     unsigned int ms;
@@ -36,7 +36,7 @@ void print_time(char* prefix)
     gettimeofday (&tv, NULL);
     ms = (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
     printf("%s: %03u\n", prefix, ms);
-}
+} */
 
 int create_client_fd(char* sock_path) {
     int len, remote_fd;
@@ -419,7 +419,7 @@ int main(int argc, char **argv, char * envp[])
     dbclient* client;
     int remote_fd;
 
-    print_time("start");
+    //print_time("start");
 
     remote_fd = create_client_fd("/tmp/.skipd_server_sock");
     if(-1 == remote_fd) {
@@ -510,9 +510,9 @@ int main(int argc, char **argv, char * envp[])
             }
             strcpy(client->command, argv[1]);
             n2 = prefix_set_command(client, argc, argv);
-            print_time("start");
+            //print_time("started");
             write(remote_fd, client->buf, n2);
-            print_time("end");
+            //print_time("end");
 
             //setnonblock(remote_fd);
             //n1 = parse_common_result(client);

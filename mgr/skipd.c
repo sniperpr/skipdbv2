@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <fcntl.h>
-#include <unistd.h>
 #include <getopt.h>
 #include <limits.h> // [LONG|INT][MIN|MAX]
 #include <errno.h>  // errno
@@ -130,7 +129,7 @@ ev_signal signal_watcher;
 ev_signal signal_watcher2;
 char static_buffer[512];
 
-void print_time(char* prefix)
+/* static void print_time(char* prefix)
 {
     struct timeval tv;
     unsigned int ms;
@@ -138,7 +137,7 @@ void print_time(char* prefix)
     gettimeofday (&tv, NULL);
     ms = (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
     printf("%s: %03u\n", prefix, ms);
-}
+} */
 
 static void sigint_cb (EV_P_ ev_signal *w, int revents) {
     ev_signal_stop (EV_A_ w);
@@ -524,13 +523,13 @@ static int client_run_command(EV_P_ skipd_client* client)
         dvalue = Datum_FromData_length_((unsigned char*)p1, client->data_len - (p1 - client->origin));
 
         //OK a little hack hear
-        print_time("beginset");
+        //print_time("beginset");
         SkipDB_beginTransaction(client->server->db);
         SkipDB_at_put_(client->server->db, dkey, dvalue);
         //SkipDB_commitTransaction(client->server->db);
 	    //SkipDB_sync(client->server->db);
         server_sync(EV_A_ client->server);
-        print_time("endset");
+        //print_time("endset");
 
         p1 = "ok\n";
         client_send(EV_A_ client, p1, strlen(p1));
@@ -1015,7 +1014,7 @@ static void server_cb(EV_P_ ev_io *w, int revents) {
             break;
         }
 
-        print_time("newclient");
+        //print_time("newclient");
         client = client_new(client_fd);
         client->server = server;
         ev_io_start(EV_A_ &client->io_read);
