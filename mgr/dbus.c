@@ -553,7 +553,6 @@ int main(int argc, char **argv, char * envp[])
             check_buf(client, n1 + HEADER_PREFIX);
             n2 = snprintf(client->buf, client->buf_max, "%s%07d %s __event__%s %s\n", MAGIC, n1, client->command, argv[2], argv[3]);
             write(remote_fd, client->buf, n2);
-            printf("\n");
 
             //setnonblock(remote_fd);
             //n1 = parse_common_result(client);
@@ -572,7 +571,6 @@ int main(int argc, char **argv, char * envp[])
             check_buf(client, n1 + HEADER_PREFIX);
             n2 = snprintf(client->buf, client->buf_max, "%s%07d %s %s %s %s\n", MAGIC, n1, client->command, argv[2], argv[3], argv[4]);
             write(remote_fd, client->buf, n2);
-            printf("\n");
 
             //setnonblock(remote_fd);
             //n1 = parse_common_result(client);
@@ -592,7 +590,6 @@ int main(int argc, char **argv, char * envp[])
             check_buf(client, n1 + HEADER_PREFIX);
             n2 = snprintf(client->buf, client->buf_max, "%s%07d %s %s %s %s\n", MAGIC, n1, client->command, argv[2], argv[3], argv[4]);
             write(remote_fd, client->buf, n2);
-            printf("\n");
 
             //setnonblock(remote_fd);
             //n1 = parse_common_result(client);

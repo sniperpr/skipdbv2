@@ -1312,7 +1312,7 @@ static int check_dbpath(skipd_server* server)
 
 int main(int argc, char **argv)
 {
-    int n = 0, daemon = 0, max_queue = -1;
+    int n = 0, daemon = 0, max_queue = 64;
     int syslog_options = LOG_PID | LOG_PERROR | LOG_DEBUG;
     skipd_server *server;
     //struct ev_periodic every_few_seconds;
