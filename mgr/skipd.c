@@ -474,7 +474,7 @@ static int client_ccr_read_util(skipd_client* client, int step_len) {
 static int client_run_command(EV_P_ skipd_client* client)
 {
     char *p1, *p2;
-    time_t t1, t2, epoch;
+    time_t t1, t2, epoch, t3;
     int tmpi, tmp2;
     struct tm tm1, tm2, *tnow;
     Datum dkey, dvalue;
@@ -514,11 +514,14 @@ static int client_run_command(EV_P_ skipd_client* client)
         dvalue = Datum_FromData_length_((unsigned char*)p1, client->data_len - (p1 - client->origin));
 
         //OK a little hack hear
+        t3 = time(NULL);
+        skipd_log(SKIPD_DEBUG, "begin write:%d\n", (int)t3);
         SkipDB_beginTransaction(client->server->db);
         SkipDB_at_put_(client->server->db, dkey, dvalue);
         //SkipDB_commitTransaction(client->server->db);
 	    //SkipDB_sync(client->server->db);
         server_sync(EV_A_ client->server);
+        skipd_log(SKIPD_DEBUG, "end write:%d\n", (int)t3);
 
         p1 = "ok\n";
         client_send(EV_A_ client, p1, strlen(p1));
@@ -989,6 +992,7 @@ static skipd_client* client_new(int fd) {
 // This callback is called when data is readable on the unix socket.
 static void server_cb(EV_P_ ev_io *w, int revents) {
     int client_fd;
+    time_t t;
     skipd_client* client;
 
     skipd_server* server = container_of(w, skipd_server, io);
@@ -1003,7 +1007,8 @@ static void server_cb(EV_P_ ev_io *w, int revents) {
             break;
         }
 
-        //skipd_log(SKIPD_DEBUG, "accepted a client\n");
+        t = time(NULL);
+        skipd_log(SKIPD_DEBUG, "accepted a client %d\n", (int)t);
         client = client_new(client_fd);
         client->server = server;
         ev_io_start(EV_A_ &client->io_read);

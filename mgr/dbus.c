@@ -394,9 +394,15 @@ dbclient* gclient;
 int main(int argc, char **argv, char * envp[])
 {
     int n1, n2, err = 0;
+    time_t t3;
     struct tm tm1;
     dbclient* client;
-    int remote_fd = create_client_fd("/tmp/.skipd_server_sock");
+    int remote_fd;
+
+    t3 = time(NULL);
+    fprintf(stderr, "start:%d\n", t3);
+
+    remote_fd = create_client_fd("/tmp/.skipd_server_sock");
     if(-1 == remote_fd) {
         return -1;
     }
@@ -485,7 +491,11 @@ int main(int argc, char **argv, char * envp[])
             }
             strcpy(client->command, argv[1]);
             n2 = prefix_set_command(client, argc, argv);
+            t3 = time(NULL);
+            fprintf(stderr, "write:%d\n", t3);
             write(remote_fd, client->buf, n2);
+            t3 = time(NULL);
+            fprintf(stderr, "end:%d\n", t3);
 
             //setnonblock(remote_fd);
             //n1 = parse_common_result(client);
