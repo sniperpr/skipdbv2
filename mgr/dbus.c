@@ -28,6 +28,7 @@ typedef struct _dbclient {
     int buf_pos;
 } dbclient;
 
+#if 0
 static void print_time(char* prefix)
 {
     struct timeval tv;
@@ -35,15 +36,16 @@ static void print_time(char* prefix)
 
     gettimeofday (&tv, NULL);
     ms = (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
-    printf("%s: %03u\n", prefix, ms);
+    fprintf(stderr, "%s: %03u\n", prefix, ms);
 }
+#endif
 
 int create_client_fd(char* sock_path) {
     int len, remote_fd;
     struct sockaddr_un remote;
 
     if(-1 == (remote_fd = socket(PF_UNIX, SOCK_STREAM, 0))) {
-        perror("socket");
+        //perror("socket");
         return -1;
     }
 
@@ -51,7 +53,7 @@ int create_client_fd(char* sock_path) {
     strcpy(remote.sun_path, sock_path);
     len = strlen(remote.sun_path) + sizeof(remote.sun_family);
     if(-1 == connect(remote_fd, (struct sockaddr*)&remote, len)) {
-        perror("connect");
+        //perror("connect");
         close(remote_fd);
         return -1;
     }
@@ -306,11 +308,44 @@ int parse_script_result(dbclient *client) {
     return 0;
 }
 
+static void write_util(dbclient* client, int len) {
+    int n, writed_len = 0;
+    unsigned int now, timeout;
+    struct timeval tv,  tv2;
+
+    gettimeofday(&tv2, NULL);
+    timeout = (tv2.tv_sec * 1000) + (tv2.tv_usec / 1000) + 20;
+
+    while(writed_len < len) {
+        n = write(client->remote_fd, client->buf + writed_len, len-writed_len);
+        if(n < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                gettimeofday(&tv, NULL);
+                now = (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
+                fprintf(stderr, "timeout\n");
+                if(now > timeout) {
+                    break;
+                }
+
+                usleep(5);
+                continue;
+            }
+        }
+        writed_len += n;
+    }
+
+    if(writed_len != len) {
+        fprintf(stderr, "write error\n");
+        exit(1);
+    }
+}
+
 static void bulk_key(dbclient* client, char* command, char* prefix, char* envp[]) {
     char** env;
     char *p1, *p2;
     int n1, n2, nenv, nc, nkey, np = strlen(prefix);
 
+    //print_time("begin writing");
     strcpy(client->command, command);
     nc = strlen(client->command);
     for (env = envp; *env != 0; env++) {
@@ -334,7 +369,10 @@ static void bulk_key(dbclient* client, char* command, char* prefix, char* envp[]
 
         client->buf[n1+HEADER_PREFIX] = '\0';
         client->buf[n1+HEADER_PREFIX-1] = '\n';
-        write(client->remote_fd, client->buf, n1 + HEADER_PREFIX);
+        //print_time("writing");
+        //write(client->remote_fd, client->buf, n1 + HEADER_PREFIX);
+        write_util(client,  n1 + HEADER_PREFIX);
+        //print_time("writed");
     }
 }
 
@@ -393,11 +431,23 @@ int main(int argc, char **argv, char * envp[])
     dbclient* client;
     int remote_fd;
 
-    print_time("start");
+    //print_time("start");
 
     remote_fd = create_client_fd("/tmp/.skipd_server_sock");
     if(-1 == remote_fd) {
+#if 1
+        //Try to restart skipd
+        system("service start_skipd >/dev/null 2>&1 &");
+        sleep(1);
+        remote_fd = create_client_fd("/tmp/.skipd_server_sock");
+        if(-1 == remote_fd) {
+            perror("connect to skipd error");
+            return -1;
+        }
+#else
+        perror("connect to skipd error");
         return -1;
+#endif
     }
     gclient = (dbclient*)calloc(1, sizeof(dbclient));
     gclient->remote_fd = remote_fd;
@@ -488,9 +538,9 @@ int main(int argc, char **argv, char * envp[])
             }
             strcpy(client->command, argv[1]);
             n2 = prefix_set_command(client, argc, argv);
-            print_time("started");
+            //print_time("started");
             write(remote_fd, client->buf, n2);
-            print_time("end");
+            //print_time("end");
 
             //setnonblock(remote_fd);
             //n1 = parse_common_result(client);
