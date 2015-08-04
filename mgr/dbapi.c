@@ -116,6 +116,19 @@ int dbclient_bulk(dbclient* client, char* command, char* key, char* value) {
     nk = strlen(key);
     nv = strlen(value);
 
-    n1 = ;
+    n1 = nc + nk + nv + 3;// replace key value\n
+    check_buf(client, n1 + HEADER_PREFIX);
+    n2 = sprintf(client->buf, "%s%07d %s %s %s\n", MAGIC, n1, command, key, value);
+
+    return write_util(client, n1 + HEADER_PREFIX, 200);
+}
+
+int dbclient_end(dbclient* client) {
+    if(NULL != client->buf) {
+        free(client->buf);
+    }
+    if((-1 != client->remote_fd) || (0 != client->remote_fd)) {
+        close(client->remote_fd);
+    }
 }
 
