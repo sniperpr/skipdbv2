@@ -40,7 +40,7 @@ static void print_time(char* prefix)
 }
 #endif
 
-int create_client_fd(char* sock_path) {
+static int create_client_fd(char* sock_path) {
     int len, remote_fd;
     struct sockaddr_un remote;
 
