@@ -1332,7 +1332,7 @@ int main(int argc, char **argv)
 
     strcpy(server->sock_path, "/tmp/.skipd_server_sock");
 
-#if 1
+#if 0
     strcpy(server->pid_path, "/tmp/.skipd_pid");
     strcpy(server->db_path, "/jffs/db");
     daemon = 1;

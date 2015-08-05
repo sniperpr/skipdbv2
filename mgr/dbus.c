@@ -16,6 +16,9 @@
 #include <unistd.h>
 #include "skipd.h"
 
+//"list "
+#define LIST_LEN 5
+
 typedef struct _dbclient {
     int remote_fd;
     char command[DELAY_KEY_LEN+1];
@@ -295,7 +298,7 @@ int parse_script_result(dbclient *client) {
             break;
         }
 
-        p1 = client->buf + 5;
+        p1 = client->buf + LIST_LEN;
         p2 = strstr(p1, " ");
         *p2 = '\0';
         p2++;
