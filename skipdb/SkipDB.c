@@ -524,6 +524,19 @@ SkipDBRecord *SkipDB_recordAt_(SkipDB *self, Datum k)
 	return SkipDBRecord_find_quick_(self->header, k, 0);
 }
 
+int SkipDB_replace_put_(SkipDB *self, Datum k, Datum v)
+{
+	SkipDBRecord *r = SkipDB_recordAt_(self, k);
+        if(r) {
+		// update record
+		SkipDBRecord_valueDatum_(r, v);
+		SkipDBRecord_markAsDirty(r);
+                return 1;
+        }
+
+        return 0;
+}
+
 SkipDBRecord *SkipDB_recordAt_put_(SkipDB *self, Datum k, Datum v)
 {
 	SkipDBRecord *r = SkipDB_recordAt_(self, k);

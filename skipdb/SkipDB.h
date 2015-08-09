@@ -120,6 +120,7 @@ void SkipDB_deleteRecordsToRemove(SkipDB *self);
 
 SKIPDB_API SkipDBRecord *SkipDB_recordAt_(SkipDB *self, Datum k);
 SKIPDB_API SkipDBRecord *SkipDB_recordAt_put_(SkipDB *self, Datum k, Datum v);
+SKIPDB_API int SkipDB_replace_put_(SkipDB *self, Datum k, Datum v);
 
 // bdb style api
 
