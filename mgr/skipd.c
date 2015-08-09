@@ -706,7 +706,7 @@ static int client_run_command(EV_P_ skipd_client* client)
         } */
 
         SkipDB_beginTransaction(client->server->db);
-        if(SkipDB_replace_put_(client->server->db, dkey, dvalue)) {
+        if(SkipDB_at_put_(client->server->db, dkey, dvalue)) {
             p1 = "exists\n";
             free(delay_obj);
             client_send(EV_A_ client, p1, strlen(p1));
@@ -780,7 +780,7 @@ static int client_run_command(EV_P_ skipd_client* client)
         }*/
 
         SkipDB_beginTransaction(client->server->db);
-        if(SkipDB_replace_put_(client->server->db, dkey, dvalue)) {
+        if(SkipDB_at_put_(client->server->db, dkey, dvalue)) {
             p1 = "exists\n";
             client_send(EV_A_ client, p1, strlen(p1));
             free(time_obj);

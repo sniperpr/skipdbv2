@@ -124,7 +124,7 @@ SKIPDB_API int SkipDB_replace_put_(SkipDB *self, Datum k, Datum v);
 
 // bdb style api
 
-SKIPDB_API void SkipDB_at_put_(SkipDB *self, Datum k, Datum v);
+SKIPDB_API int SkipDB_at_put_(SkipDB *self, Datum k, Datum v);
 SKIPDB_API Datum SkipDB_at_(SkipDB *self, Datum k);
 SKIPDB_API void SkipDB_removeAt_(SkipDB *self, Datum k);
 

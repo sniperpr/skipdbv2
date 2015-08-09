@@ -537,9 +537,10 @@ int SkipDB_replace_put_(SkipDB *self, Datum k, Datum v)
         return 0;
 }
 
-SkipDBRecord *SkipDB_recordAt_put_(SkipDB *self, Datum k, Datum v)
+static int SkipDB_recordAt_put_inner(SkipDB *self, Datum k, Datum v, SkipDBRecord** pp)
 {
 	SkipDBRecord *r = SkipDB_recordAt_(self, k);
+        int rlt;
 	//SkipDB_showUpdate(self);
 
 	if (r)
@@ -547,6 +548,7 @@ SkipDBRecord *SkipDB_recordAt_put_(SkipDB *self, Datum k, Datum v)
 		// update record
 		SkipDBRecord_valueDatum_(r, v);
 		SkipDBRecord_markAsDirty(r);
+                rlt = 1;
 	}
 	else
 	{
@@ -618,9 +620,20 @@ SkipDBRecord *SkipDB_recordAt_put_(SkipDB *self, Datum k, Datum v)
 		}
 
 		SkipDBRecord_markAsDirty(r);
+                rlt = 0;
 	}
 
-	return r;
+        if(NULL != pp) {
+            *pp = r;
+        }
+
+        return rlt;
+}
+
+SkipDBRecord *SkipDB_recordAt_put_(SkipDB *self, Datum k, Datum v) {
+    SkipDBRecord *p = NULL;
+    SkipDB_recordAt_put_inner(self, k, v, &p);
+    return p;
 }
 
 // Datum API -------------------------------------
@@ -643,9 +656,10 @@ Datum SkipDB_at_(SkipDB *self, Datum k)
 	return Datum_Empty();
 }
 
-void SkipDB_at_put_(SkipDB *self, Datum k, Datum v)
+int SkipDB_at_put_(SkipDB *self, Datum k, Datum v)
 {
-	SkipDB_recordAt_put_(self, k, v);
+	//SkipDB_recordAt_put_(self, k, v);
+        return SkipDB_recordAt_put_inner(self, k, v, NULL);
 }
 
 void SkipDB_removeAt_(SkipDB *self, Datum k)
