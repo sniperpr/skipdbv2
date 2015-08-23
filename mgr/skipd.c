@@ -127,7 +127,9 @@ char* global_magic = MAGIC;
 skipd_server* global_server;
 ev_signal signal_watcher;
 ev_signal signal_watcher2;
-char static_buffer[512];
+
+#define STATIC_BUF_LEN 511
+char static_buffer[STATIC_BUF_LEN+1];
 
 #if 0
 static void print_time(char* prefix)
@@ -147,7 +149,11 @@ static void sigint_cb (EV_P_ ev_signal *w, int revents) {
 }
 
 void sys_script(char *cmd) {
-    snprintf(static_buffer, sizeof(static_buffer), "%s > /tmp/skipd.log 2>&1 &\n", cmd);
+    if(NULL == cmd) {
+        return;
+    }
+
+    snprintf(static_buffer, STATIC_BUF_LEN, "%s > /tmp/skipd.log 2>&1 &\n", cmd);
     system(static_buffer);
     strcpy(static_buffer, ""); // Ensure we don't re-execute it again
 }
@@ -270,25 +276,32 @@ static void delay_cmd_cb(EV_P_ ev_timer* watcher, int revents) {
     Datum dvalue = SkipDB_at_(delay_obj->server->db, dkey);
     do {
         if(NULL == dvalue.data) {
-            //TODO log hear, Not exists
+            skipd_log(SKIPD_DEBUG, "delay cmd:%s, dvalue.data is null\n", dkey.data);
             break;
         }
 
         p1 = strstr((char*)dvalue.data, " ");
         if(NULL == p1) {
+            skipd_log(SKIPD_DEBUG, "delay cmd:%s, dvalue.data error\n", dkey.data);
             break;
         }
 
         tmpi = (unsigned char*)p1 - dvalue.data;
+        if(tmpi > STATIC_BUF_LEN) {
+            skipd_log(SKIPD_DEBUG, "delay cmd:%s, dvalue.data error\n", dkey.data);
+            break;
+        }
         memcpy(static_buffer, dvalue.data, tmpi);
         static_buffer[tmpi] = '\0';
         if(S2ISUCCESS != str2int(&tmpi, static_buffer, 10)) {
+            skipd_log(SKIPD_DEBUG, "delay cmd:%s, str2int error\n", dkey.data);
             break;
         }
 
         p1++;
         sys_script(p1);
         if(0 == tmpi) {
+            skipd_log(SKIPD_DEBUG, "delay cmd:%s, delay delete, tmpi = 0\n", dkey.data);
             break;
         }
 
@@ -1206,6 +1219,10 @@ static void server_init_delay(EV_P_ skipd_server *server) {
         p1 = strstr((char*)dvalue.data, " ");
         if(NULL != p1) {
             n1 = (p1 - (char*)dvalue.data);
+            if(n1 > STATIC_BUF_LEN || dkey.size > DELAY_KEY_LEN) {
+                skipd_log(SKIPD_DEBUG, "delay read key error: %s\n", dkey.data);
+                continue;
+            }
             memcpy(static_buffer, dvalue.data, n1);
             static_buffer[n1] = '\0';
             if(S2ISUCCESS == str2int(&n1, static_buffer, 10)) {
@@ -1248,6 +1265,11 @@ static void server_init_time(EV_P_ skipd_server *server) {
         p1 = strstr((char*)dvalue.data, " ");
         if(NULL != p1) {
             n1 = (p1 - (char*)dvalue.data);
+            if(n1 > STATIC_BUF_LEN || dkey.size > DELAY_KEY_LEN) {
+                skipd_log(SKIPD_DEBUG, "read time error, key=%s\n", dkey.data);
+                break;
+            }
+
             memcpy(static_buffer, dvalue.data, n1);
             static_buffer[n1] = '\0';
 
@@ -1261,7 +1283,7 @@ static void server_init_time(EV_P_ skipd_server *server) {
                 t2 = mktime(&tm2);
 
                 if(t2 > t1) {
-                    time_obj = (delay_cmd*)malloc(sizeof(time_cmd));
+                    time_obj = (time_cmd*)malloc(sizeof(time_cmd));
                     memcpy(time_obj->key, dkey.data, dkey.size);
                     time_obj->key[dkey.size] = '\0';
                     time_obj->server = server;
@@ -1356,7 +1378,7 @@ int main(int argc, char **argv)
 
     strcpy(server->sock_path, "/tmp/.skipd_server_sock");
 
-#if 0
+#if 1
     strcpy(server->pid_path, "/tmp/.skipd_pid");
     strcpy(server->db_path, "/jffs/db");
     daemon = 1;
@@ -1369,8 +1391,8 @@ int main(int argc, char **argv)
             switch (n) {
             case 'D':
                 //TODO fix me if optarg is bigger than PATH_MAX
-                strcpy(server->pid_path, optarg);
-                daemon = 1;
+                //strcpy(server->pid_path, optarg);
+                daemon = 0;
                 break;
             case 'd':
                 strcpy(server->db_path, optarg);
@@ -1386,6 +1408,7 @@ int main(int argc, char **argv)
     }
 
     if(0 == strlen(server->db_path) || (0 != check_dbpath(server))) {
+        //syslog not initialize hear
         fprintf(stderr, "Database path error\n");
         return 1;
     }
