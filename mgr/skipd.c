@@ -1227,6 +1227,10 @@ static void server_init_delay(EV_P_ skipd_server *server) {
             static_buffer[n1] = '\0';
             if(S2ISUCCESS == str2int(&n1, static_buffer, 10)) {
                 delay_obj = (delay_cmd*)malloc(sizeof(delay_cmd));
+                if(NULL == delay_obj) {
+                    skipd_log(SKIPD_DEBUG, "delay out of memory\n");
+                    break;
+                }
                 memcpy(delay_obj->key, dkey.data, dkey.size);
                 delay_obj->key[dkey.size] = '\0';
                 delay_obj->tick = n1;
@@ -1276,6 +1280,10 @@ static void server_init_time(EV_P_ skipd_server *server) {
             if (strptime(static_buffer, "%H:%M:%S", &tm1) != NULL) {
                 t1 = time(NULL);
                 tnow = localtime(&t1);
+                if(NULL == tnow) {
+                    skipd_log(SKIPD_DEBUG, "localtime error\n");
+                    break;
+                }
                 tm2 = *tnow;
                 tm2.tm_sec = tm1.tm_sec;
                 tm2.tm_min = tm1.tm_min;
@@ -1284,6 +1292,10 @@ static void server_init_time(EV_P_ skipd_server *server) {
 
                 if(t2 > t1) {
                     time_obj = (time_cmd*)malloc(sizeof(time_cmd));
+                    if(NULL == time_obj) {
+                        skipd_log(SKIPD_DEBUG, "out of memory\n");
+                        break;
+                    }
                     memcpy(time_obj->key, dkey.data, dkey.size);
                     time_obj->key[dkey.size] = '\0';
                     time_obj->server = server;
