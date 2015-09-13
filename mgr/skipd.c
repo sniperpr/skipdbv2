@@ -826,7 +826,31 @@ static int client_run_command(EV_P_ skipd_client* client)
     } else if(!strcmp(client->command, "fire")) {
         p1 = p2+1;
         //TODO check length hear
-        client->key = (char*)malloc(DELAY_KEY_LEN);
+        client->key = (char*)malloc(DELAY_KEY_LEN*2);
+        sprintf(client->key, "/usr/bin/%s.sh", p1);
+        if(-1 != access(client->key, F_OK)) {
+            //file exist, than run script
+            sys_script(client->key);
+
+            //send end
+            p1 = "ok\n";
+            client_send(EV_A_ client, p1, strlen(p1));
+            free(client->key);
+            ccrReturn(ctx, ccr_error_ok1);
+        } else {
+            sprintf(client->key, "/jffs/scripts/%s.sh", p1);
+            if(-1 != access(client->key, F_OK)) {
+                //file exist, than run script
+                sys_script(client->key);
+
+                //send end
+                p1 = "ok\n";
+                client_send(EV_A_ client, p1, strlen(p1));
+                free(client->key);
+                ccrReturn(ctx, ccr_error_ok1);
+            }
+        }
+
         sprintf(client->key, "__event__%s", p1);
         p1 = p2+1;
 
